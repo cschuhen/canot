@@ -104,6 +104,7 @@ mod app {
     //use embassy_stm32::can::BusError;
 
     use embedded_hal_async::{delay::DelayNs, digital::Wait};
+    use j1939_async as j1939;
 
     use super::*;
 

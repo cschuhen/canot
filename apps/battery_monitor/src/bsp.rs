@@ -6,6 +6,7 @@ use embassy_stm32::mode;
 use embassy_stm32::peripherals::*;
 use embassy_stm32::{bind_interrupts, can, i2c, peripherals, spi};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use j1939_async as j1939;
 
 bind_interrupts!(struct CanIrqs {
     FDCAN1_IT0 => can::IT0InterruptHandler<FDCAN1>;

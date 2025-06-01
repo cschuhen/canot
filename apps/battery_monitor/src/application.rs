@@ -3,7 +3,8 @@ use embassy_stm32::can;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use j1939::can::CanInterface;
-use j1939::Id;
+use j1939_async as j1939;
+use j1939_async::Id;
 use oled_async::display::DisplayVariant;
 use oled_async::prelude::*;
 

@@ -4,6 +4,7 @@ use crate::error::ErrorCode;
 use crate::graphical_elements::*;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::Rectangle;
+use j1939_async as j1939;
 const FILE_CODE: u8 = 0x03;
 
 // To convert C .h header to 1-bit data use these regexes:

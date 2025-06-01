@@ -48,7 +48,7 @@ pub trait DrawableSomewhere {
 }
 
 pub fn drwerr<D>(line: u32, detail: D) -> Error {
-    j1939::error::mkerr_ptr(
+    j1939_async::error::mkerr_ptr(
         FILE_CODE,
         ErrorCode::DisplayDraw as u8,
         line,

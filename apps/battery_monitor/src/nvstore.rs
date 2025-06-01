@@ -4,6 +4,7 @@ use core::ops::Range;
 #[cfg(feature = "power_sensors")]
 use embedded_storage_async::nor_flash::NorFlash;
 use j1939::error::mkerr_generic;
+use j1939_async as j1939;
 use w25q32jv::W25q32jv;
 
 #[allow(unused_variables)]

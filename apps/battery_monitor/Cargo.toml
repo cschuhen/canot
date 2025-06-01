@@ -58,7 +58,7 @@ ina226 = { version = "0.3.0", features = [] }
 #shared-bus = { version = "0.2.5", features =  ["cortex-m"] }
 #bxcan = "0.7.0"
 heapless = "0.8"
-j1939 = { path = "../../can/j1939", features=["embassy"] }
+j1939-async = { path = "../../../j1939/j1939-async", version = "0.1.0-alpha1",features=["embassy"] }
 stm32g4 = { path = "../../bsp/stm32g4" }
 #stm32f1 = { path = "../../bsp/stm32f1" }
 #stm32-device-signature = { version = "0.3.3", features = ["stm32f1"] }
@@ -69,9 +69,7 @@ embedded-graphics-core = "0.4"
 #embedded-storage = "0.2.0"
 void = { version = "1.0.2", default-features = false }
 binary-layout = { version = "3.1.3", default-features = false  }
-lexical-core = { version = "0.8.5", default-features=false, features=["write-floats", "format"]}
 
-bme280 = "0.3.0"
 panic-reset = "0.1.1"
 
 defmt = "0.3"
@@ -81,7 +79,7 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 sequential-storage = { version = "4.0.1" , features = ["defmt-03"] }
 embedded-storage-async = "0.4.1"
 w25q32jv = { version = "0.5", features = ["default", "defmt", "megabits128", "async"]}
-oled_async = "0.1.0-alpha1"
+oled_async = "0.2.0"
 async-debounce = {version="0.2.0"}
 tfmt = "0.4.0"
 libm = "0.2.11"
@@ -91,14 +89,15 @@ libm = "0.2.11"
 
 
 [patch.crates-io]
-embedded-graphics = {path="/home/cschuhen/rust/embedded-graphics"}
-embedded-graphics-core = {path="/home/cschuhen/rust/embedded-graphics/core"}
-oled_async = {path="/home/cschuhen/rust/oled_drivers"}
-embassy-stm32 = { path = "/home/cschuhen/rust/embassy-corey/embassy-stm32"}
-embassy-sync = { path = "/home/cschuhen/rust/embassy-corey/embassy-sync"}
-embassy-futures = { path = "/home/cschuhen/rust/embassy-corey/embassy-futures"}
-embassy-time = { path = "/home/cschuhen/rust/embassy-corey/embassy-time"}
-embassy-embedded-hal = { path = "/home/cschuhen/rust/embassy-corey/embassy-embedded-hal"}
+#j1939-async = { path = "../../../j1939/j1939-async" }
+embedded-graphics = {path="../../../embedded-graphics"}
+embedded-graphics-core = {path="../../../embedded-graphics/core"}
+oled_async = {path="../../../oled_drivers"}
+embassy-stm32 = { path = "../../../embassy/embassy-stm32"}
+embassy-sync = { path = "../../../embassy/embassy-sync"}
+embassy-futures = { path = "../../../embassy/embassy-futures"}
+embassy-time = { path = "../../../embassy/embassy-time"}
+embassy-embedded-hal = { path = "../../../embassy/embassy-embedded-hal"}
 #eeprom24x = { path="/home/cschuhen/rust/ref/eeprom24x-rs" }
 #w25q32jv = { path="/home/cschuhen/rust/w25q32jv/"}
 

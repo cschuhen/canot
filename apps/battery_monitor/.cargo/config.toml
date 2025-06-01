@@ -14,8 +14,6 @@ runner = "probe-rs run --chip STM32G431CBUx --probe 0483:3748:39"
 
 # Battery monitor
 #runner = "probe-rs run --chip STM32G431CBUx --probe 0483:3748:52C3BF6C0648C2835248756225C287"
-#runner = "probe-rs run --chip STM32G431CBUx --connect-under-reset "
-#runner = "probe-rs run --chip STM32G431CBUx"
 
 [build]
 target = "thumbv7em-none-eabi"    # Cortex-M3

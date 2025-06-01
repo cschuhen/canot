@@ -1,4 +1,5 @@
 use j1939::process_data;
+use j1939_async as j1939;
 
 //use rtt_target::{defmt::println};
 use crate::{mkerr, nvstore::ELEM_MIN_POWER_MON_CHAN0};

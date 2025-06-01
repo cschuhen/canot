@@ -22,15 +22,15 @@ pub enum ErrorCode {
     CAN = 20,
 }
 
-pub use j1939::error::Error;
-pub use j1939::error::SendError;
+pub use j1939_async::error::Error;
+pub use j1939_async::error::SendError;
 
 pub fn mkerr(file_code: u8, code: crate::error::ErrorCode, line: u32) -> Error {
-    j1939::error::mkerr_base(file_code, code as u8, line, 0)
+    j1939_async::error::mkerr_base(file_code, code as u8, line, 0)
 }
 
 pub fn mkerrd(file_code: u8, code: crate::error::ErrorCode, line: u32, detail: u32) -> Error {
-    j1939::error::mkerr_base(file_code, code as u8, line, detail)
+    j1939_async::error::mkerr_base(file_code, code as u8, line, detail)
 }
 
 /*impl From<eeprom24x::Error<embassy_stm32::i2c::Error>> for Error {

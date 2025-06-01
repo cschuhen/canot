@@ -73,8 +73,7 @@ version = "0.1.0"
 dependencies = [
  "async-debounce",
  "binary-layout",
- "bitflags 2.9.0",
- "bme280",
+ "bitflags 2.9.1",
  "byteorder",
  "cortex-m",
  "cortex-m-rt",
@@ -100,8 +99,7 @@ dependencies = [
  "futures",
  "heapless 0.8.0",
  "ina226",
- "j1939",
- "lexical-core",
+ "j1939-async",
  "libm",
  "nb 1.1.0",
  "oled_async",
@@ -141,18 +139,18 @@ checksum = "46afbd2983a5d5a7bd740ccb198caf5b82f45c40c09c0eed36052d91cb92e719"
 
 [[package]]
 name = "bitfield"
-version = "0.19.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "786e53b0c071573a28956cec19a92653e42de34c683e2f6e86c197a349fba318"
+checksum = "db1bcd90f88eabbf0cadbfb87a45bceeaebcd3b4bc9e43da379cd2ef0162590d"
 dependencies = [
  "bitfield-macros",
 ]
 
 [[package]]
 name = "bitfield-macros"
-version = "0.19.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07805405d3f1f3a55aab895718b488821d40458f9188059909091ae0935c344a"
+checksum = "3787a07661997bfc05dd3431e379c0188573f78857080cf682e1393ab8e4d64c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -167,9 +165,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.9.0"
+version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
+checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
 
 [[package]]
 name = "block-device-driver"
@@ -178,15 +176,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44c051592f59fe68053524b4c4935249b806f72c1f544cfb7abe4f57c3be258e"
 dependencies = [
  "aligned",
-]
-
-[[package]]
-name = "bme280"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32c139eaf2284d0c91a25f61d84dd326444cace86cb0371f45d71d2d055ba432"
-dependencies = [
- "embedded-hal 0.2.7",
 ]
 
 [[package]]
@@ -473,7 +462,7 @@ version = "0.2.0"
 dependencies = [
  "aligned",
  "bit_field",
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "block-device-driver",
  "cfg-if",
  "cortex-m",
@@ -852,7 +841,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d4e80c27f5c3114711a5bacb7bbc51f88e60855607585747e72c6fd1e4cbd2c"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "byteorder",
  "embedded-hal 1.0.0",
  "maybe-async-cfg",
@@ -869,10 +858,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "j1939"
-version = "1.86.0"
+name = "j1939-async"
+version = "0.1.0-alpha1"
 dependencies = [
- "bitfield 0.19.0",
+ "bitfield 0.19.1",
  "defmt 0.3.100",
  "embassy-sync",
  "embedded-can",
@@ -961,9 +950,9 @@ checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "lock_api"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
+checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -1044,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "oled_async"
-version = "0.1.0-alpha1"
+version = "0.2.0"
 dependencies = [
  "defmt 0.3.100",
  "display-interface",
@@ -1167,7 +1156,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "679341d22c78c6c649893cbd6c3278dcbe9fc4faa62fea3a9296ae2b50c14625"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "memchr",
  "unicase",
 ]
