@@ -12,8 +12,7 @@
   "rust-analyzer.showUnlinkedFileNotification": false,
   "rust-analyzer.cargo.target": "thumbv7em-none-eabi",
   "rust-analyzer.cargo.features": [
-    "js1",
-    "terminal",
+    "js1"
     "power_sensors",
   ],
   "rust-analyzer.linkedProjects": [

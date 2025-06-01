@@ -1,0 +1,38 @@
+// Folder-specific settings
+//
+// For a full list of overridable settings, and general information on folder-specific settings,
+// see the documentation: https://zed.dev/docs/configuring-zed#settings-files
+{
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        // get more cargo-less diagnostics from rust-analyzer,
+        // which might include false-positives (those can be turned off by their names)
+        "diagnostics": {
+          "experimental": {
+            //"enable": true
+          }
+        },
+        //"check.allTargets": false,
+        //"check.noDefaultFeatures": true,
+        //"showUnlinkedFileNotification": false,
+        "linkedProjects": [
+          //"/home/cschuhen/rust/embassy-corey/embassy-stm32/Cargo.toml"
+        ],
+
+        "cargo": {
+          "target": "thumbv7em-none-eabi",
+          "rust-analyzer.cargo.noDefaultFeatures": true,
+
+          //"features": ["js1", "terminal"]
+          "features": ["js1", "battery_monitor"]
+          //  "allTargets": false
+        }
+        // Use `-p` instead of `--workspace` for cargo check
+        //"check": {
+        //  "workspace": false
+        //}
+      }
+    }
+  }
+}
