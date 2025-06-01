@@ -1,0 +1,23 @@
+{
+  "editor.formatOnSave": true,
+  "[toml]": {
+    "editor.formatOnSave": false
+  },
+  "[markdown]": {
+    "editor.formatOnSave": false
+  },
+  "rust-analyzer.check.allTargets": false,
+  "rust-analyzer.check.noDefaultFeatures": true,
+  "rust-analyzer.cargo.noDefaultFeatures": true,
+  "rust-analyzer.showUnlinkedFileNotification": false,
+  "rust-analyzer.cargo.target": "thumbv7em-none-eabi",
+  "rust-analyzer.cargo.features": [
+    "js1"
+  ],
+  "rust-analyzer.linkedProjects": [
+    // Uncomment ONE line for the chip you want to work on.
+    // This makes rust-analyzer work on the example crate and all its dependencies.
+    //"embassy-stm32/Cargo.toml",
+    // "/home/cschuhen/rust/embassy-corey/examples/stm32g4/Cargo.toml"
+  ],
+}
