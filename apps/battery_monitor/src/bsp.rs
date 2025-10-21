@@ -25,8 +25,9 @@ bind_interrupts!(struct I2c2Irqs {
 pub type ExtiPin = embassy_stm32::exti::ExtiInput<'static>;
 pub type MonitorAlertPins = [ExtiPin; 4];
 pub type InputPins = [ExtiPin; 3];
-pub type NvI2c = embassy_stm32::i2c::I2c<'static, mode::Blocking>;
-pub type SensorI2c = embassy_stm32::i2c::I2c<'static, mode::Async>;
+pub type NvI2c = embassy_stm32::i2c::I2c<'static, mode::Blocking, embassy_stm32::i2c::mode::Master>;
+pub type SensorI2c =
+    embassy_stm32::i2c::I2c<'static, mode::Async, embassy_stm32::i2c::mode::Master>;
 #[allow(dead_code)]
 pub type SensorDevice = I2cDevice<'static, NoopRawMutex, SensorI2c>;
 pub type OutputPin = Output<'static>;
@@ -162,21 +163,21 @@ impl Bsp {
             //I2c2Irqs,
             //embassy_stm32::dma::NoDma,
             //embassy_stm32::dma::NoDma,
-            Hertz(100_000),
+            //Hertz(100_000),
             Default::default(),
         );
         use embassy_stm32::i2c::*;
         // Setup I2C Bus manager
-        let sensors_i2c = I2c::new(
-            p.I2C1,
-            p.PA15, // SCL
-            p.PB7,  // SDA
-            I2c1Irqs,
-            p.DMA1_CH1,
-            p.DMA1_CH2,
-            Hertz(400_000),
-            Default::default(),
-        );
+        let sensors_i2c = {
+            let mut config = embassy_stm32::i2c::Config::default();
+            config.frequency = Hertz(400_000);
+            I2c::new(
+                p.I2C1, p.PA15, // SCL
+                p.PB7,  // SDA
+                I2c1Irqs, p.DMA1_CH1, p.DMA1_CH2, //Hertz(400_000),
+                config,
+            )
+        };
 
         let crc_config = embassy_stm32::crc::Config::new(
             embassy_stm32::crc::InputReverseConfig::None,
