@@ -107,6 +107,10 @@ impl Monitor {
     pub fn set_total_charge_ua_ms(&mut self, val: i64) {
         self.total_charge_ua_ms = val;
     }
+    pub fn set_total_charge_uah(&mut self, val: i32) {
+        let uah = (val as i64 ) * 3_600_000;
+        self.set_total_charge_ua_ms(uah)
+    }
     pub fn set_total_charge_a_h(&mut self, charge_a_h: f64) {
         let charge_a_ms = charge_a_h * 3600.0 * 1000.0;
         let charge_ua_ms = charge_a_ms * 1_000_000.0;
@@ -214,6 +218,10 @@ impl Monitor {
             }
             j1939::process_data::DDI_PROP_SHUNT_OFFSET => {
                 handle_settable_pd_value(nvstore, pd, &mut self.shunt_voltage_offset).await
+            }
+            j1939::process_data::DDI_PROP_TOTAL_CHARGE => {
+                self.set_total_charge_uah(pd.value as i32);
+                Ok(process_data::PdReturn::new_changed())
             }
             _ => Ok(process_data::PdReturn::new_not_handled()),
         }
