@@ -202,6 +202,18 @@ impl PdStateStore {
             Err(_) => None,
         }
     }
+
+    pub fn get_identifier_from_ui_index(&self, ui_index: i32) -> Option<PdIdentifier> {
+        if ui_index < 0 || ui_index > 256 {
+            return None;
+        }
+        for record in &self.vec {
+            if record.state.ui_index == ui_index as u8 {
+                return Some(record.id);
+            }
+        }
+        None
+    }
 }
 
 const MAX_NUMBERS: usize = 20;

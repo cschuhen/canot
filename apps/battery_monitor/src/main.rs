@@ -790,6 +790,8 @@ mod app {
             B,
             Idle,
         }
+        let mut press_time = Option::<embassy_time::Instant>::None;
+
         let mut encoder_state: EncoderState = EncoderState::Idle;
         loop {
             use crate::application::HumanEvent;
@@ -863,28 +865,39 @@ mod app {
                     }
                 },
                 Either3::Third(_) => match button.is_high() {
-                    Ok(true) => sender
-                        .send(MainEvent::HID(HumanEvent::EncoderButtonPressed))
-                        .await
-                        .map_err(|e| {
-                            j1939::error::mkerr_generic(
-                                FILE_CODE,
-                                crate::error::ErrorCode::SendEvent as u8,
-                                line!(),
-                                e,
-                            )
-                        }),
-                    Ok(false) => sender
-                        .send(MainEvent::HID(HumanEvent::EncoderButtonReleased))
-                        .await
-                        .map_err(|e| {
-                            j1939::error::mkerr_generic(
-                                FILE_CODE,
-                                crate::error::ErrorCode::SendEvent as u8,
-                                line!(),
-                                e,
-                            )
-                        }),
+                    Ok(true) => {
+                        press_time = Some(embassy_time::Instant::now());
+                        sender
+                            .send(MainEvent::HID(HumanEvent::EncoderButtonPressed))
+                            .await
+                            .map_err(|e| {
+                                j1939::error::mkerr_generic(
+                                    FILE_CODE,
+                                    crate::error::ErrorCode::SendEvent as u8,
+                                    line!(),
+                                    e,
+                                )
+                            })
+                    }
+                    Ok(false) => {
+                        if press_time.is_none() {
+                            // Spurious?
+                            Ok(())
+                        } else {
+                            let duration = embassy_time::Instant::now() - press_time.unwrap();
+                            sender
+                                .send(MainEvent::HID(HumanEvent::EncoderButtonReleased(duration)))
+                                .await
+                                .map_err(|e| {
+                                    j1939::error::mkerr_generic(
+                                        FILE_CODE,
+                                        crate::error::ErrorCode::SendEvent as u8,
+                                        line!(),
+                                        e,
+                                    )
+                                })
+                        }
+                    }
                     Err(_) => {
                         encoder_state = EncoderState::Idle;
                         Ok(())

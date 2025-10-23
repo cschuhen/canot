@@ -18,7 +18,7 @@ pub enum HumanEvent {
     EncoderClockwise,
     EncoderAntiClockwise,
     EncoderButtonPressed,
-    EncoderButtonReleased,
+    EncoderButtonReleased(embassy_time::Duration),
 }
 
 pub enum MainEvent {
@@ -372,17 +372,47 @@ impl MonitorApp {
             HumanEvent::EncoderButtonPressed => {
                 defmt::println!("Press")
             }
-            HumanEvent::EncoderButtonReleased => {
-                defmt::println!("Release");
-                self.ui.mode.next();
-                let mut i = 1;
-                for num in &mut self.ui.numbers {
-                    num.set_value(12345678 * i);
-                    i += 1;
+            HumanEvent::EncoderButtonReleased(duration) => {
+                if duration > embassy_time::Duration::from_millis(2000) {
+                    defmt::println!("Long-press");
+                    #[cfg(feature = "terminal")]
+                    self.on_long_press().await?;
+                } else {
+                    defmt::println!("Release");
+                    self.ui.mode.next();
                 }
             }
         }
         self.ui.redraw().await
+    }
+
+    #[cfg(feature = "terminal")]
+    async fn on_long_press(&mut self) -> Result<bool, crate::Error> {
+        defmt::println!("Long-press detected");
+        let maybe_id = self
+            .ui
+            .pd_state_store
+            .get_identifier_from_ui_index(self.ui.selected);
+        if let Some(id) = maybe_id {
+            defmt::println!("Resetting PD {:?}", id);
+
+            self.stack
+                .send_broadcast(
+                    &mut self.can_sender,
+                    &self.name,
+                    j1939::pgn::PROCESS_DATA,
+                    7,
+                    &j1939::process_data::ProcessData::new(
+                        j1939::process_data::Command::Value,
+                        id.element_num,
+                        id.ddi,
+                        0,
+                    )
+                    .data(),
+                )
+                .await?;
+        }
+        Ok(true)
     }
 
     #[cfg(feature = "terminal")]
