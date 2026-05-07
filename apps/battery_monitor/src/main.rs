@@ -790,6 +790,7 @@ mod app {
             B,
             Idle,
         }
+
         let mut press_time = Option::<embassy_time::Instant>::None;
 
         let mut encoder_state: EncoderState = EncoderState::Idle;

@@ -134,7 +134,7 @@ impl Bsp {
         }
         let p = embassy_stm32::init(config);
 
-        let device_id = j1939::name::identiy_from_bytes(&embassy_stm32::uid::uid());
+        let device_id = j1939::name::identiy_from_bytes(&(*embassy_stm32::uid::uid())[..]);
         //defmt::println!("DID {:?}->{:x}", embassy_stm32::uid::uid(), device_id);
         let can_iface = can::CanConfigurator::new(p.FDCAN1, p.PA11, p.PA12, CanIrqs);
         let mut cansleep = Output::new(p.PA10, Level::Low, Speed::Low);

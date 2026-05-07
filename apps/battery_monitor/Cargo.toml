@@ -64,7 +64,7 @@ stm32g4 = { path = "../../bsp/stm32g4" }
 #stm32-device-signature = { version = "0.3.3", features = ["stm32f1"] }
 eeprom24x = { version="0.7" }
 display-interface-spi = "0.5.0"
-embedded-graphics = {version="0.8.1"}
+embedded-graphics = {version="0.8.2"}
 embedded-graphics-core = "0.4"
 #embedded-storage = "0.2.0"
 void = { version = "1.0.2", default-features = false }
@@ -90,8 +90,8 @@ libm = "0.2.11"
 
 [patch.crates-io]
 #j1939-async = { path = "../../../j1939/j1939-async" }
-embedded-graphics = {path="../../../embedded-graphics"}
-embedded-graphics-core = {path="../../../embedded-graphics/core"}
+#embedded-graphics = {path="../../../embedded-graphics"}
+#embedded-graphics-core = {path="../../../embedded-graphics/core"}
 oled_async = {path="../../../oled_drivers"}
 #embassy-stm32 = { path = "../../../embassy/embassy-stm32"}
 #embassy-sync = { path = "../../../embassy/embassy-sync"}

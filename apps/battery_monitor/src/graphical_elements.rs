@@ -246,23 +246,15 @@ impl<'a, 'b> DrawableSomewhere for NumberWithIcon<'a, 'b> {
                     image[i] = !image[i];
                 }
 
-                match ImageRaw::<BinaryColor>::new(&image, Size::new(16, 16)) {
-                    Ok(raw_image) => {
-                        Image::new(&raw_image, pos)
-                            .draw(target)
-                            .map_err(|e| drwerr(line!(), e))?;
-                    }
-                    Err(_) => {}
-                }
+                let raw_image = ImageRaw::<BinaryColor>::new(&image, 16);
+                Image::new(&raw_image, pos)
+                    .draw(target)
+                    .map_err(|e| drwerr(line!(), e))?;
             } else {
-                match ImageRaw::<BinaryColor>::new(self.image, Size::new(16, 16)) {
-                    Ok(raw_image) => {
-                        Image::new(&raw_image, pos)
-                            .draw(target)
-                            .map_err(|e| drwerr(line!(), e))?;
-                    }
-                    Err(_) => {}
-                }
+                let raw_image = ImageRaw::<BinaryColor>::new(self.image, 16);
+                Image::new(&raw_image, pos)
+                    .draw(target)
+                    .map_err(|e| drwerr(line!(), e))?;
             }
         } else {
             big.set_background_color(Some(BinaryColor::Off));
