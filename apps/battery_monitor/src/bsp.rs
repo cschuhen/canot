@@ -1,11 +1,11 @@
-use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can::CanConfigurator;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::mode;
 use embassy_stm32::peripherals::*;
 use embassy_stm32::{bind_interrupts, can, i2c, peripherals, spi};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
 use j1939_async as j1939;
 
 bind_interrupts!(struct CanIrqs {
@@ -29,7 +29,7 @@ pub type NvI2c = embassy_stm32::i2c::I2c<'static, mode::Blocking, embassy_stm32:
 pub type SensorI2c =
     embassy_stm32::i2c::I2c<'static, mode::Async, embassy_stm32::i2c::mode::Master>;
 #[allow(dead_code)]
-pub type SensorDevice = I2cDevice<'static, NoopRawMutex, SensorI2c>;
+pub type SensorDevice = I2cDevice<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, SensorI2c>;
 pub type OutputPin = Output<'static>;
 pub type Crc = embassy_stm32::crc::Crc<'static>;
 
@@ -134,7 +134,7 @@ impl Bsp {
         }
         let p = embassy_stm32::init(config);
 
-        let device_id = j1939::name::identiy_from_bytes(&embassy_stm32::uid::uid());
+        let device_id = j1939::name::identiy_from_bytes(&(*embassy_stm32::uid::uid())[..]);
         //defmt::println!("DID {:?}->{:x}", embassy_stm32::uid::uid(), device_id);
         let can_iface = can::CanConfigurator::new(p.FDCAN1, p.PA11, p.PA12, CanIrqs);
         let mut cansleep = Output::new(p.PA10, Level::Low, Speed::Low);

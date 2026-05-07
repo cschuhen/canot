@@ -108,7 +108,7 @@ impl Monitor {
         self.total_charge_ua_ms = val;
     }
     pub fn set_total_charge_uah(&mut self, val: i32) {
-        let uah = (val as i64 ) * 3_600_000;
+        let uah = (val as i64) * 3_600_000;
         self.set_total_charge_ua_ms(uah)
     }
     pub fn set_total_charge_a_h(&mut self, charge_a_h: f64) {
