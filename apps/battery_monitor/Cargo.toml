@@ -42,6 +42,7 @@ embassy-sync = { version = "0.7.2", features = [ "defmt"]  }
 embassy-futures = { version = "0.1.2", features = [ "defmt"]  }
 embassy-time = { version = "0.5.0", features = ["defmt", "generic-queue-8"]  }
 embassy-embedded-hal = { version = "0.5.0", features = [ "defmt"]  }
+embassy-executor = { version = "0.1.0", features = ["nightly"] }
 futures = { version = "0.3.17", default-features = false, features = ["async-await"] }
 #rtt-target = { version = "0.3.1", features = ["cortex-m"] }
 #panic-rtt-target = { version = "0.1.2", features = ["cortex-m"] }
