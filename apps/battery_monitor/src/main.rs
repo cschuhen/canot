@@ -108,6 +108,10 @@ static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::n
 #[cfg(feature = "power_sensors")]
 static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = OnceLock::new();
 
+// Global static for can suspended event sender (moved out of RTIC Local resources)
+// Using OnceLock for async access pattern consistency with other globals
+static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> = embassy_sync::once_lock::OnceLock::new();
+
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
 // (only accessed by ignition_task, no concurrency concerns)
 
@@ -117,7 +121,7 @@ mod app {
     //use embassy_stm32::can::BusError;
 
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-    use embassy_sync::channel::{Channel, Sender, Receiver};
+    use embassy_sync::channel::{Channel, Receiver};
     use embassy_time::Delay;
     use embedded_hal_async::delay::DelayNs;
     use j1939_async as j1939;
@@ -142,7 +146,7 @@ mod app {
         //i2c_devices: MonitorInterfaces,
         //mon_alert_pins: bsp::MonitorAlertPins,
         //mon_obs_event_sender: Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
-        can_suspended_event_sender: Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
+        //can_suspended_event_sender: Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
         #[cfg(feature = "terminal")]
         encoder_args: EncoderArgs,
     }
@@ -308,6 +312,8 @@ mod app {
             StaticCell::new();
         let main_channel = MAIN_CHANNEL.init(Channel::new());
         let main_event_sender = main_channel.sender();
+        // Initialize can suspended event sender as global static (moved out of RTIC Local)
+        CAN_SUSPENDED_SENDER.get_or_init(|| main_event_sender.clone());
         let main_event_receiver = main_channel.receiver();
 
         let nvs = nvstore::NvStore::new(
@@ -359,7 +365,6 @@ mod app {
                 //i2c_devices,
                 //mon_alert_pins,
                 //mon_obs_event_sender: main_event_sender.clone(),
-                can_suspended_event_sender: main_event_sender.clone(),
                 #[cfg(feature = "terminal")]
                 encoder_args: EncoderArgs(
                     encoder_pins,
@@ -439,7 +444,7 @@ mod app {
         }
     }
 
-    #[task(priority=1, shared=[ignition_state], local = [cansleep, can_suspended_event_sender])]
+    #[task(priority=1, shared=[ignition_state], local = [cansleep])]
     #[allow(unused_mut)]
     async fn ignition_task(mut cx: ignition_task::Context) {
         #[cfg(feature = "power_sensors")]
@@ -469,10 +474,7 @@ mod app {
 
                         cx.shared.ignition_state.lock(|is| *is = enabled);
 
-                        cx.local
-                            .can_suspended_event_sender
-                            .send(MainEvent::CanEnabled(enabled))
-                            .await;
+                        CAN_SUSPENDED_SENDER.get().await.send(MainEvent::CanEnabled(enabled)).await;
                     }
                 }
             }
