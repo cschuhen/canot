@@ -115,6 +115,10 @@ static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = On
 // Using OnceLock for async access pattern consistency with other globals
 static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> = embassy_sync::once_lock::OnceLock::new();
 
+// Global static for CAN interface (moved out of RTIC Local resources)
+// Using OnceLock since BufferedCan is Clone+Send and used by multiple tasks
+static CAN_IFACE: embassy_sync::once_lock::OnceLock<can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>> = embassy_sync::once_lock::OnceLock::new();
+
 // Main error sender - kept in Local (only used by main_task, no sharing needed)
 
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
@@ -142,7 +146,7 @@ mod app {
     #[local]
     struct Local {
         main_error_sender: crate::bsp::BufferedCanErrorSender,
-        can_iface: can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
+        //can_iface: can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
         cansleep: crate::bsp::OutputPin,
         //rtc: Rtc,
         app: crate::application::MonitorApp,
@@ -202,7 +206,12 @@ mod app {
             TX_BUF.init(can::TxBuf::<CAN_TX_BUF_SIZE>::new()),
             RX_BUF.init(can::RxBuf::<CAN_RX_BUF_SIZE>::new()),
         );
-        let mut error_sender = crate::bsp::BufferedCanErrorSender::new(can_iface.writer());
+        // Get reader/writer before moving can_iface into static
+        let can_reader = can_iface.reader();
+        let can_writer = can_iface.writer();
+        let mut error_sender = crate::bsp::BufferedCanErrorSender::new(can_writer.clone());
+        // Initialize CAN interface as global static (moved out of RTIC Local)
+        CAN_IFACE.get_or_init(|| can_iface);
 
         error_sender.report(FILE_CODE, ErrorCode::CheckPoint as u8, line!());
 
@@ -303,8 +312,8 @@ mod app {
 
         let app = crate::application::MonitorApp::new(
             embassy_time::Instant::now(),
-            can_iface.reader(),
-            can_iface.writer(),
+            can_reader,
+            can_writer,
             device_id,
             #[cfg(feature = "terminal")]
             display,
@@ -356,7 +365,7 @@ mod app {
             },
             // Return Local resources
             Local {
-                can_iface,
+                //can_iface,
                 cansleep,
                 //rtc,
                 app,
@@ -532,7 +541,7 @@ mod app {
         Ok(ret)
     }
 
-    #[task(priority=2, local = [main_error_sender, can_iface, app], shared=[data_store])]
+    #[task(priority=2, local = [main_error_sender, app], shared=[data_store])]
     async fn main_task(
         mut cx: main_task::Context,
         mut args: MainArgs,
