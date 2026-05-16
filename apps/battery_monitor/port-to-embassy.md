@@ -25,3 +25,73 @@
 ### Phase 2: Final Port (Execution)
 
 *   [ ] **Final Migration:** Only after ensuring all pre-changes are stable, remove the RTIC framework entirely and replace it with the `embassy-executor`.
+
+---
+
+## Completed Work Log
+
+### Ignition Pin Migration to Global Static (2026-05-16)
+
+**Goal:** Move `ignition_pin` out of RTIC's Local resources into a global static as preparation for embassy migration.
+
+**Changes Made:**
+
+1. **Added OnceLock import and static declaration:**
+   ```rust
+   #[cfg(feature = "power_sensors")]
+   use embassy_sync::once_lock::OnceLock;
+   
+   #[cfg(feature = "power_sensors")]
+   static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = OnceLock::new();
+   ```
+
+2. **Removed from RTIC Local struct:**
+   - Removed `ignition_pin: crate::bsp::ExtiPin` from `Local` struct
+   - Removed `ignition_pin` from init() return tuple
+
+3. **Initialize in init():**
+   ```rust
+   #[cfg(feature = "power_sensors")]
+   { let _ignition_pin_ref = IGNITION_PIN.get_or_init(|| Mutex::new(ignition_pin)); }
+   ```
+
+4. **Update ignition_task to use global static:**
+   - Wrapped pin in `Mutex<CriticalSectionRawMutex, ExtiPin>` for safe shared access
+   - Use `IGNITION_PIN.get().await` to get reference asynchronously
+   - Access pin methods through mutex: `ignition_pin_ref.lock().await.wait_for_any_edge()`
+   - Added manual debounce (10ms delay) since Debouncer wrapper can't own the pin from static
+   - Wrapped power_sensors feature-gated code in `#[cfg(feature = "power_sensors")]` block
+   - Added fallback for non-power_sensors builds
+
+**Key Design Decisions:**
+
+- **OnceLock over StaticCell:** OnceLock provides async `.get().await` which is needed for embassy-style access. StaticCell only provides synchronous access.
+- **Mutex wrapper:** Even though only one task uses ignition_pin currently, wrapping in Mutex prepares for future multi-task scenarios in embassy context.
+- **Manual debounce:** async_debounce::Debouncer requires ownership of the pin type, which can't be obtained from a static. Implemented simple 10ms delay-based debounce instead.
+- **Feature gating:** All IGNITION_PIN usage gated behind `#[cfg(feature = "power_sensors")]` since ignition_pin is only available with that feature.
+
+**Build Verification:**
+- ✅ Both build targets compile successfully:
+  - `--features=power_sensors`
+  - `--features=terminal`
+
+**Files Modified:**
+- `/home/cschuhen/rust/canot/apps/battery_monitor/src/main.rs`
+
+---
+
+### Previous Work Summary
+
+#### Async I2C and INA226 Conversion
+- Switched from blocking to async `embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice`
+- Added `async` feature to ina226 dependency in Cargo.toml
+- Converted all INA226 methods to use `.await`
+- Moved device setup from sync init() to async i2c_task
+- Changed read_monitor() from sync to async function
+
+#### RTIC Sync → Embassy Sync Migration
+- Replaced `rtic_sync::{channel::*, make_channel}` with `embassy_sync::channel::{Channel, Sender, Receiver}`
+- Used `CriticalSectionRawMutex` for channels (required for Send+Sync in RTIC context)
+- Updated all type signatures to include mutex parameter
+- Fixed API differences: `.recv()` → `.receive()`, `.send(...).await` returns `()` not `Result`
+- Removed `[dependencies.rtic-sync]` from Cargo.toml

@@ -39,6 +39,8 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Sender;
 #[cfg(feature = "power_sensors")]
 use embassy_sync::mutex::Mutex;
+#[cfg(feature = "power_sensors")]
+use embassy_sync::once_lock::OnceLock;
 use static_cell::StaticCell;
 
 #[cfg(feature = "power_sensors")]
@@ -97,6 +99,12 @@ struct PowerSensorArgs(
 
 static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::new();
 
+// Global static for ignition pin (moved out of RTIC Local resources)
+// Using OnceLock with Mutex for safe shared access in preparation for embassy migration
+#[cfg(feature = "power_sensors")]
+#[cfg(feature = "power_sensors")]
+static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = OnceLock::new();
+
 #[app(device = crate::pac, peripherals = false, dispatchers = [USART1, USART2, USART3])]
 mod app {
 
@@ -105,7 +113,7 @@ mod app {
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
     use embassy_sync::channel::{Channel, Sender, Receiver};
     use embassy_time::Delay;
-    use embedded_hal_async::{delay::DelayNs, digital::Wait};
+    use embedded_hal_async::delay::DelayNs;
     use j1939_async as j1939;
 
     use super::*;
@@ -121,7 +129,6 @@ mod app {
         main_error_sender: crate::bsp::BufferedCanErrorSender,
         can_iface: can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
         cansleep: crate::bsp::OutputPin,
-        ignition_pin: crate::bsp::ExtiPin,
         //rtc: Rtc,
         app: crate::application::MonitorApp,
         #[cfg(feature = "power_sensors")]
@@ -143,7 +150,7 @@ mod app {
             device_id,
             mut can_iface,
             cansleep,
-            ignition_pin,
+            mut ignition_pin,
             mut leds,
             nvstore_i2c,
             mut sensors_i2c,
@@ -153,6 +160,10 @@ mod app {
             crc,
             display_connector,
         ) = bsp::Bsp::new();
+
+        // Initialize ignition pin as global static (moved out of RTIC Local)
+        #[cfg(feature = "power_sensors")]
+        { let _ignition_pin_ref = IGNITION_PIN.get_or_init(|| Mutex::new(ignition_pin)); }
 
         leds[0].set_high();
         leds[1].set_low();
@@ -328,7 +339,6 @@ mod app {
             Local {
                 can_iface,
                 cansleep,
-                ignition_pin,
                 //rtc,
                 app,
                 #[cfg(feature = "power_sensors")]
@@ -421,20 +431,22 @@ mod app {
         }
     }
 
-    #[task(priority=1, shared=[ignition_state], local = [ignition_pin, cansleep, can_suspended_event_sender])]
+    #[task(priority=1, shared=[ignition_state], local = [cansleep, can_suspended_event_sender])]
+    #[allow(unused_mut)]
     async fn ignition_task(mut cx: ignition_task::Context) {
-        let mut enabled = true;
-        defmt::println!("Ignition task started");
-        let mut ignition_pin = async_debounce::Debouncer::new(
-            cx.local.ignition_pin,
-            embassy_time::Duration::from_millis(10),
-        );
-        let mut delay = Delay {};
-        loop {
-            use embedded_hal::digital::InputPin;
-            match ignition_pin.wait_for_any_edge().await {
-                Ok(()) => {
-                    let ignition = ignition_pin.is_high().unwrap();
+        #[cfg(feature = "power_sensors")]
+        {
+            let mut enabled = true;
+            defmt::println!("Ignition task started");
+            let mut delay = Delay {};
+            loop {
+                // Wait for any edge on the ignition pin (manual debounce)
+                let ignition_pin_ref = IGNITION_PIN.get().await;
+            match ignition_pin_ref.lock().await.wait_for_any_edge().await {
+                () => {
+                    // Debounce: wait a short time and re-check
+                    delay.delay_ms(10).await;
+                    let ignition = ignition_pin_ref.lock().await.is_high();
 
                     if ignition != enabled {
                         defmt::println!("Ignition state changed: {}", ignition);
@@ -456,6 +468,11 @@ mod app {
                     }
                 }
             }
+            }
+        }
+        #[cfg(not(feature = "power_sensors"))]
+        {
+            let _cx = &cx;
         }
     }
 
@@ -695,7 +712,7 @@ mod app {
             // Now enter the alert-driven monitoring loop
             run_power_sensors(cx.local.power_sensors).await;
         }
-        }
+    }
 
     #[cfg(feature = "power_sensors")]
     async fn run_power_sensors(
@@ -785,6 +802,7 @@ mod app {
             use crate::application::MainEvent;
             use embassy_futures::select::{select3, Either3};
             use embedded_hal::digital::InputPin;
+            use embedded_hal_async::digital::Wait;
             let res: Result<(), Error> = match select3(
                 enc_a.wait_for_any_edge(),
                 enc_b.wait_for_any_edge(),
