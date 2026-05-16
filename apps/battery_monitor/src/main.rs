@@ -29,19 +29,22 @@ pub mod types;
 #[cfg(feature = "terminal")]
 pub mod ui;
 
+
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+#[cfg(feature = "power_sensors")]
 #[cfg(feature = "power_sensors")]
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 #[cfg(feature = "power_sensors")]
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use static_cell::StaticCell;
 #[cfg(any(feature = "power_sensors", feature = "terminal"))]
 use embassy_sync::channel::Sender;
 #[cfg(feature = "power_sensors")]
 use embassy_sync::mutex::Mutex;
 #[cfg(feature = "power_sensors")]
 use embassy_sync::once_lock::OnceLock;
-use static_cell::StaticCell;
+
 
 #[cfg(feature = "power_sensors")]
 use ina226::INA226;
@@ -111,6 +114,8 @@ static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = On
 // Global static for can suspended event sender (moved out of RTIC Local resources)
 // Using OnceLock for async access pattern consistency with other globals
 static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> = embassy_sync::once_lock::OnceLock::new();
+
+// Main error sender - kept in Local (only used by main_task, no sharing needed)
 
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
 // (only accessed by ignition_task, no concurrency concerns)
@@ -573,23 +578,17 @@ mod app {
 
         #[cfg(feature = "power_sensors")]
         if let Err(_) = i2c_task::spawn() {
-            cx.local
-                .main_error_sender
-                .report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
 
         if let Err(_) = start_flash::spawn(data_store, &NVSTORE) {
-            cx.local
-                .main_error_sender
-                .report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
 
         args.leds[4].set_high();
 
         if let Err(_) = blink::spawn(&mut args.leds[0]) {
-            cx.local
-                .main_error_sender
-                .report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
 
         match cx.local.app.init().await {
@@ -603,9 +602,7 @@ mod app {
         match ignition_task::spawn() {
             Ok(_) => {}
             Err(_) => {
-                cx.local
-                    .main_error_sender
-                    .report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+                cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
             }
         }
 
