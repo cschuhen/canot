@@ -103,7 +103,13 @@ static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::n
 // Using OnceLock with Mutex for safe shared access in preparation for embassy migration
 #[cfg(feature = "power_sensors")]
 #[cfg(feature = "power_sensors")]
+// Global static for ignition pin (moved out of RTIC Local resources)
+// Using OnceLock with Mutex for safe shared access in preparation for embassy migration
+#[cfg(feature = "power_sensors")]
 static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = OnceLock::new();
+
+// CAN sleep pin - kept in Local due to OutputPin not implementing Sync
+// (only accessed by ignition_task, no concurrency concerns)
 
 #[app(device = crate::pac, peripherals = false, dispatchers = [USART1, USART2, USART3])]
 mod app {
@@ -149,7 +155,7 @@ mod app {
         let bsp::Bsp(
             device_id,
             mut can_iface,
-            cansleep,
+            mut cansleep,
             mut ignition_pin,
             mut leds,
             nvstore_i2c,
@@ -164,6 +170,8 @@ mod app {
         // Initialize ignition pin as global static (moved out of RTIC Local)
         #[cfg(feature = "power_sensors")]
         { let _ignition_pin_ref = IGNITION_PIN.get_or_init(|| Mutex::new(ignition_pin)); }
+
+
 
         leds[0].set_high();
         leds[1].set_low();
@@ -468,8 +476,8 @@ mod app {
                     }
                 }
             }
-            }
         }
+    }
         #[cfg(not(feature = "power_sensors"))]
         {
             let _cx = &cx;
