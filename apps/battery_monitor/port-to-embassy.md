@@ -80,6 +80,89 @@
 
 ---
 
+### CAN Suspended Event Sender Migration to Global Static (2026-05-16)
+
+**Goal:** Move `can_suspended_event_sender` out of RTIC's Local resources into a global static.
+
+**Changes Made:**
+
+1. **Added OnceLock import and static declaration:**
+   ```rust
+   static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> = embassy_sync::once_lock::OnceLock::new();
+   ```
+
+2. **Removed from RTIC Local struct:**
+   - Removed `can_suspended_event_sender` from `Local` struct
+   - Removed it from init() return tuple
+
+3. **Initialize in init():**
+   ```rust
+   CAN_SUSPENDED_SENDER.get_or_init(|| main_event_sender.clone());
+   ```
+
+4. **Update ignition_task to use global static:**
+   - Use `CAN_SUSPENDED_SENDER.get().await.send(MainEvent::CanEnabled(enabled)).await`
+   - Removed from task's local resources declaration
+
+**Key Design Decisions:**
+- OnceLock provides async `.get().await` for embassy-style access
+- Sender is Clone+Send, making it suitable for global static storage
+- No Mutex wrapper needed since Senders are designed for sharing
+
+**Build Verification:**
+- ✅ Both build targets compile successfully
+
+---
+
+### CAN Interface Migration to Global Static (2026-05-16)
+
+**Goal:** Move `can_iface` out of RTIC's Local resources into a global static.
+
+**Changes Made:**
+
+1. **Added OnceLock import and static declaration:**
+   ```rust
+   static CAN_IFACE: embassy_sync::once_lock::OnceLock<can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>> = embassy_sync::once_lock::OnceLock::new();
+   ```
+
+2. **Removed from RTIC Local struct:**
+   - Removed `can_iface` from `Local` struct
+   - Removed it from init() return tuple and task local resources
+
+3. **Initialize in init():**
+   ```rust
+   let can_reader = can_iface.reader();
+   let can_writer = can_iface.writer();
+   CAN_IFACE.get_or_init(|| can_iface);
+   ```
+
+4. **Update app creation:**
+   - Use pre-extracted `can_reader` and `can_writer` instead of calling methods on moved value
+
+**Key Design Decisions:**
+- OnceLock provides async `.get().await` for embassy-style access
+- BufferedCan is Clone+Send, making it suitable for global static storage
+- Reader/writer extracted before moving can_iface into static to avoid borrow issues
+
+**Build Verification:**
+- ✅ Both build targets compile successfully
+
+---
+
+### Items Kept in Local (Not Moved)
+
+The following items were considered but kept in RTIC's Local resources:
+
+1. **main_error_sender (BufferedCanErrorSender):** Only used by main_task, no sharing needed across tasks
+2. **cansleep (OutputPin):** OutputPin doesn't implement Sync, can't be used with OnceLock/Mutex patterns
+3. **app (MonitorApp):** Only used by main_task, no sharing needed
+4. **power_sensors (PowerSensorArgs):** Feature-gated, complex struct with multiple fields
+5. **encoder_args (EncoderArgs):** Feature-gated for terminal feature only
+
+**Rationale:** For embassy migration preparation, the key is moving resources that need to be shared across tasks or accessed from async contexts without RTIC's local resource mechanism. Single-task resources don't benefit as much from being moved to global statics.
+
+---
+
 ### Previous Work Summary
 
 #### Async I2C and INA226 Conversion
