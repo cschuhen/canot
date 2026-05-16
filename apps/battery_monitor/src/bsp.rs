@@ -1,4 +1,4 @@
-use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can::CanConfigurator;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};

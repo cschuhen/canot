@@ -49,7 +49,7 @@ futures = { version = "0.3.17", default-features = false, features = ["async-awa
 #   panic-abort
 #   panic-ramdump
 #   panic-persist
-ina226 = { version = "0.3.0", features = [] }
+ina226 = { version = "0.3.0", features = ["async"] }
 #cortex-m-rtic = "1.1.3"
 #systick-monotonic = "1.0.0"
 #shared-bus = { version = "0.2.5", features =  ["cortex-m"] }

@@ -911,6 +911,7 @@ dependencies = [
  "bitflags 2.11.1",
  "byteorder",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "maybe-async-cfg",
 ]
 

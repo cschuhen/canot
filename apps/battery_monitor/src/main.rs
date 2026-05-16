@@ -30,17 +30,15 @@ pub mod types;
 pub mod ui;
 
 #[cfg(feature = "power_sensors")]
-use core::cell::RefCell;
-#[cfg(feature = "power_sensors")]
-use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 #[cfg(feature = "power_sensors")]
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+#[cfg(any(feature = "power_sensors", feature = "terminal"))]
+use embassy_sync::channel::Sender;
 #[cfg(feature = "power_sensors")]
-use embassy_sync::blocking_mutex::Mutex;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::{Channel, Sender, Receiver};
-use embassy_time::Delay;
+use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 #[cfg(feature = "power_sensors")]
@@ -91,6 +89,7 @@ struct EncoderArgs(
 
 #[cfg(feature = "power_sensors")]
 struct PowerSensorArgs(
+    &'static Mutex<NoopRawMutex, bsp::SensorI2c>,
     MonitorInterfaces,
     bsp::MonitorAlertPins,
     Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
@@ -103,6 +102,9 @@ mod app {
 
     //use embassy_stm32::can::BusError;
 
+    use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+    use embassy_sync::channel::{Channel, Sender, Receiver};
+    use embassy_time::Delay;
     use embedded_hal_async::{delay::DelayNs, digital::Wait};
     use j1939_async as j1939;
 
@@ -196,10 +198,13 @@ mod app {
             Addresses::new()
         };
 
-        // Setup I2C Bus manager
+        // Setup I2C Bus manager (async I2c, blocking methods work during init)
+        #[cfg(feature = "power_sensors")]
+        static I2C_BUS: StaticCell<Mutex<NoopRawMutex, bsp::SensorI2c>> =
+            StaticCell::new();
         #[cfg(feature = "power_sensors")]
         let i2c_manager = {
-            // Scan for I2C addresses.
+            // Scan for I2C addresses using blocking methods (works on async I2c too).
             for addr in bsp::consts::INA226_ADDRS {
                 let mut dummy = [0u8; 0];
                 let dummy2 = [0u8; 0];
@@ -211,9 +216,7 @@ mod app {
                     Err(_e) => {}
                 }
             }
-            static I2C_BUS: StaticCell<Mutex<NoopRawMutex, RefCell<bsp::SensorI2c>>> =
-                StaticCell::new();
-            I2C_BUS.init(Mutex::new(RefCell::new(sensors_i2c)))
+            I2C_BUS.init(Mutex::new(sensors_i2c))
         };
         //#[cfg(not(feature = "power_sensors"))]
         //pub type I2cDeviceIf = I2cDevice<'static, NoopRawMutex, bsp::SensorI2c>;
@@ -223,7 +226,7 @@ mod app {
         //    crate::application::DelayForBme280 {},
         //);
 
-        // Setup I2C devices
+        // Setup I2C devices (create wrappers only, no I2C traffic yet - RTIC init is sync)
         #[cfg(feature = "power_sensors")]
         let i2c_devices = {
             let mut i2c_devices = MonitorInterfaces::new();
@@ -235,66 +238,7 @@ mod app {
                     .is_err()
                 {
                     error_sender.report(FILE_CODE, crate::ErrorCode::NoDevice as u8, line!());
-                    //report_error(crate::ErrorCode::NoSpace, line!());
                 }
-                let mon = i2c_devices.last_mut().unwrap();
-                match mon.chip.die_id() {
-                    Ok(_id) => {
-                        let bus = mon.chip.bus_voltage_raw();
-                        let shunt = mon.chip.shunt_voltage_raw();
-                        defmt::println!("Found dvc id={} bus={} shunt={}", _id, bus, shunt);
-                    }
-                    Err(_e) => {
-                        error_sender.report(FILE_CODE, crate::ErrorCode::NoDevice as u8, line!());
-                        i2c_devices.pop();
-                        //report_error(crate::ErrorCode::NoDevice, line!());
-                    }
-                }
-            }
-
-            leds[2].set_low();
-
-            for mon in &mut i2c_devices {
-                match mon.chip.die_id() {
-                    Ok(_id) => {
-                        defmt::println!("Found dvc {}", _id);
-                    }
-                    Err(_e) => {
-                        defmt::println!("No dvc");
-
-                        error_sender.report(FILE_CODE, crate::ErrorCode::NoDevice as u8, line!());
-                    }
-                }
-            }
-            leds[3].set_low();
-
-            for mon in &mut i2c_devices {
-                // Do an initial read just to check comms.
-                match (mon.chip.bus_voltage_raw(), mon.chip.shunt_voltage_raw()) {
-                    (Ok(_bus), Ok(_shunt)) => { /*defmt::println!("BOOT Bus={}v Shunt={}v", _bus, _shunt)*/
-                    }
-                    (Err(_bus), Err(_shunt)) => {
-                        error_sender.report(FILE_CODE, crate::ErrorCode::I2CRead as u8, line!())
-                    }
-                    (Ok(_), Err(_shunt)) => {
-                        error_sender.report(FILE_CODE, crate::ErrorCode::I2CRead as u8, line!())
-                    }
-                    (Err(_bus), Ok(_)) => {
-                        error_sender.report(FILE_CODE, crate::ErrorCode::I2CRead as u8, line!())
-                    }
-                }
-
-                // Configure conversions and alert.
-                let mut mon_cfg = mon.chip.configuration().unwrap().unwrap();
-                mon_cfg.mode = ina226::MODE::ShuntBusVoltageContinuous;
-                mon_cfg.avg = ina226::AVG::_1024;
-                mon_cfg.vbusct = ina226::VBUSCT::_140us;
-                mon_cfg.vshct = ina226::VSHCT::_588us;
-                mon.chip.set_configuration(&mon_cfg).unwrap();
-
-                mon.chip
-                    .set_mask_enable(ina226::MaskEnableFlags::CNVR)
-                    .unwrap();
             }
             i2c_devices
         };
@@ -389,6 +333,7 @@ mod app {
                 app,
                 #[cfg(feature = "power_sensors")]
                 power_sensors: PowerSensorArgs(
+                    i2c_manager,
                     i2c_devices,
                     mon_alert_pins,
                     main_event_sender.clone(),
@@ -599,6 +544,7 @@ mod app {
             }
         }
 
+        #[cfg(feature = "power_sensors")]
         if let Err(_) = i2c_task::spawn() {
             cx.local
                 .main_error_sender
@@ -654,20 +600,20 @@ mod app {
     }
 
     #[cfg(feature = "power_sensors")]
-    fn read_monitor(
+    async fn read_monitor(
         chip: &mut MonitorChip,
         index: u8,
         event_sender: &mut Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
     ) {
         // Must read this to clear alert.
-        let mon_mask = chip.mask_enable().unwrap();
+        let mon_mask = chip.mask_enable().await.unwrap();
 
         if !mon_mask.contains(ina226::MaskEnableFlags::CVRF) {
             return;
         }
 
-        let bus = chip.bus_voltage_raw();
-        let shunt = chip.shunt_voltage_raw();
+        let bus = chip.bus_voltage_raw().await;
+        let shunt = chip.shunt_voltage_raw().await;
         match (bus, shunt) {
             (Ok(bus), Ok(shunt)) => match event_sender.try_send(MainEvent::MonitorObservation(
                 crate::powercalc::Observation::new(index, bus, shunt),
@@ -689,15 +635,67 @@ mod app {
         }
     }
 
-    #[task(priority=3,
-        local = [power_sensors
-            ])]
-    async fn i2c_task(cx: i2c_task::Context) {
+    #[allow(unused_mut, unused_variables)]
+    #[task(priority=3, local = [power_sensors])]
+    async fn i2c_task(mut cx: i2c_task::Context) {
         #[cfg(feature = "power_sensors")]
-        run_power_sensors(cx.local.power_sensors).await;
-        // Avoid unused variable warning
-        let _cx = &cx;
-    }
+        {
+            let PowerSensorArgs(_i2c_manager, devices, _alert_pins, _event_sender) = &mut cx.local.power_sensors;
+
+            // Verify each device and configure it (runs once at startup)
+            // Collect indices to remove first to avoid borrow issues
+            let mut to_remove: heapless::Vec<usize, { consts::MAX_MONITORS }> = heapless::Vec::new();
+            for idx in 0..devices.len() {
+                match devices[idx].chip.die_id().await {
+                    Ok(_id) => {
+                        defmt::println!("Found dvc {:x}", _id);
+                        // Do an initial read to check comms
+                        let (bus, shunt) = (
+                            devices[idx].chip.bus_voltage_raw().await,
+                            devices[idx].chip.shunt_voltage_raw().await,
+                        );
+                        match (bus, shunt) {
+                            (Ok(_), Ok(_)) => {}
+                            _ => {
+                                defmt::println!("I2CRead error");
+                                let _ = to_remove.push(idx);
+                                continue;
+                            }
+                        }
+
+                        // Configure conversions and alert.
+                        let mut mon_cfg = devices[idx].chip.configuration().await.unwrap().unwrap();
+                        mon_cfg.mode = ina226::MODE::ShuntBusVoltageContinuous;
+                        mon_cfg.avg = ina226::AVG::_1024;
+                        mon_cfg.vbusct = ina226::VBUSCT::_140us;
+                        mon_cfg.vshct = ina226::VSHCT::_588us;
+                        devices[idx].chip.set_configuration(&mon_cfg).await.unwrap();
+
+                        devices[idx].chip
+                            .set_mask_enable(ina226::MaskEnableFlags::CNVR)
+                            .await
+                            .unwrap();
+                    }
+                    Err(_e) => {
+                        defmt::println!("No dvc");
+                        let _ = to_remove.push(idx);
+                    }
+                }
+            }
+
+            // Remove invalid devices (in reverse order to preserve indices)
+            let mut count = to_remove.len();
+            while count > 0 {
+                count -= 1;
+                devices.remove(to_remove[count]);
+            }
+
+            defmt::println!("Power sensors: {} devices found", devices.len());
+
+            // Now enter the alert-driven monitoring loop
+            run_power_sensors(cx.local.power_sensors).await;
+        }
+        }
 
     #[cfg(feature = "power_sensors")]
     async fn run_power_sensors(
@@ -710,7 +708,7 @@ mod app {
         //delay.delay_ms(1000).await;
 
         use embassy_futures::select::{select4, Either4};
-        let PowerSensorArgs(devices, alert_pins, event_sender) = args;
+        let PowerSensorArgs(_i2c_manager, devices, alert_pins, event_sender) = args;
         let [m0, m1, m2, m3] = alert_pins;
 
         loop {
@@ -734,7 +732,7 @@ mod app {
             }
             //defmt::println!("GotAlert {}/{}", index, cx.local.i2c_devices.len());
             //cx.local.mon0_alert_pin.wait_for_low().await;
-            read_monitor(&mut devices[index].chip, index as u8, event_sender);
+            read_monitor(&mut devices[index].chip, index as u8, event_sender).await;
             //defmt::println!("DoneAlert {}/{}", index, cx.local.i2c_devices.len());
         }
     }
