@@ -38,9 +38,9 @@ use embassy_stm32::can;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 #[cfg(feature = "power_sensors")]
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::{Channel, Sender, Receiver};
 use embassy_time::Delay;
-use rtic_sync::{channel::*, make_channel};
-//use embassy_sync::channel::*;
 use static_cell::StaticCell;
 
 #[cfg(feature = "power_sensors")]
@@ -85,7 +85,7 @@ struct MainArgs {
 #[cfg(feature = "terminal")]
 struct EncoderArgs(
     crate::bsp::InputPins,
-    Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
+    Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
     crate::bsp::BufferedCanErrorSender,
 );
 
@@ -93,7 +93,7 @@ struct EncoderArgs(
 struct PowerSensorArgs(
     MonitorInterfaces,
     bsp::MonitorAlertPins,
-    Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
+    Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
 );
 
 static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::new();
@@ -127,7 +127,7 @@ mod app {
         //i2c_devices: MonitorInterfaces,
         //mon_alert_pins: bsp::MonitorAlertPins,
         //mon_obs_event_sender: Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
-        can_suspended_event_sender: Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
+        can_suspended_event_sender: Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
         #[cfg(feature = "terminal")]
         encoder_args: EncoderArgs,
     }
@@ -341,8 +341,11 @@ mod app {
             &APPDATA,
         );
 
-        let (main_event_sender, main_event_receiver) =
-            make_channel!(MainEvent, MAIN_EVENT_CAPACITY);
+        static MAIN_CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> =
+            StaticCell::new();
+        let main_channel = MAIN_CHANNEL.init(Channel::new());
+        let main_event_sender = main_channel.sender();
+        let main_event_receiver = main_channel.receiver();
 
         let nvs = nvstore::NvStore::new(
             flash_resources,
@@ -501,17 +504,10 @@ mod app {
 
                         cx.shared.ignition_state.lock(|is| *is = enabled);
 
-                        match cx
-                            .local
+                        cx.local
                             .can_suspended_event_sender
                             .send(MainEvent::CanEnabled(enabled))
-                            .await
-                        {
-                            Ok(()) => {}
-                            Err(_e) => {
-                                defmt::println!("Error sending event");
-                            }
-                        }
+                            .await;
                     }
                 }
             }
@@ -563,7 +559,7 @@ mod app {
     async fn main_task(
         mut cx: main_task::Context,
         mut args: MainArgs,
-        mut events: Receiver<'static, MainEvent, MAIN_EVENT_CAPACITY>,
+        events: Receiver<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
     ) {
         let data_store = cx.shared.data_store.lock(|shared| *shared);
 
@@ -643,19 +639,11 @@ mod app {
         use embassy_futures::select::{select, Either};
 
         loop {
-            let ret = select(events.recv(), cx.local.app.run()).await;
+            let ret = select(events.receive(), cx.local.app.run()).await;
 
             match ret {
-                Either::First(Ok(event)) => {
+                Either::First(event) => {
                     cx.local.app.on_event(&event).await;
-                }
-                Either::First(Err(rtic_err)) => {
-                    cx.local.main_error_sender.reportd(
-                        FILE_CODE,
-                        ErrorCode::RunFail as u8,
-                        line!(),
-                        rtic_err as u32,
-                    );
                 }
                 Either::Second(Ok(())) => {}
                 Either::Second(Err(e)) => {
@@ -669,7 +657,7 @@ mod app {
     fn read_monitor(
         chip: &mut MonitorChip,
         index: u8,
-        event_sender: &mut Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
+        event_sender: &mut Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
     ) {
         // Must read this to clear alert.
         let mon_mask = chip.mask_enable().unwrap();
@@ -813,15 +801,8 @@ mod app {
                             encoder_state = EncoderState::Idle;
                             sender
                                 .send(MainEvent::HID(HumanEvent::EncoderAntiClockwise))
-                                .await
-                                .map_err(|e| {
-                                    j1939::error::mkerr_generic(
-                                        FILE_CODE,
-                                        crate::error::ErrorCode::SendEvent as u8,
-                                        line!(),
-                                        e,
-                                    )
-                                })
+                                .await;
+                            Ok(())
                         } else {
                             encoder_state = EncoderState::A;
                             Ok(())
@@ -842,15 +823,8 @@ mod app {
                             encoder_state = EncoderState::Idle;
                             sender
                                 .send(MainEvent::HID(HumanEvent::EncoderClockwise))
-                                .await
-                                .map_err(|e| {
-                                    j1939::error::mkerr_generic(
-                                        FILE_CODE,
-                                        crate::error::ErrorCode::SendEvent as u8,
-                                        line!(),
-                                        e,
-                                    )
-                                })
+                                .await;
+                            Ok(())
                         } else {
                             encoder_state = EncoderState::B;
                             Ok(())
@@ -870,15 +844,8 @@ mod app {
                         press_time = Some(embassy_time::Instant::now());
                         sender
                             .send(MainEvent::HID(HumanEvent::EncoderButtonPressed))
-                            .await
-                            .map_err(|e| {
-                                j1939::error::mkerr_generic(
-                                    FILE_CODE,
-                                    crate::error::ErrorCode::SendEvent as u8,
-                                    line!(),
-                                    e,
-                                )
-                            })
+                            .await;
+                        Ok(())
                     }
                     Ok(false) => {
                         if press_time.is_none() {
@@ -888,15 +855,8 @@ mod app {
                             let duration = embassy_time::Instant::now() - press_time.unwrap();
                             sender
                                 .send(MainEvent::HID(HumanEvent::EncoderButtonReleased(duration)))
-                                .await
-                                .map_err(|e| {
-                                    j1939::error::mkerr_generic(
-                                        FILE_CODE,
-                                        crate::error::ErrorCode::SendEvent as u8,
-                                        line!(),
-                                        e,
-                                    )
-                                })
+                                .await;
+                            Ok(())
                         }
                     }
                     Err(_) => {

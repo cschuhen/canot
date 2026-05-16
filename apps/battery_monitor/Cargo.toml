@@ -18,10 +18,6 @@ terminal = []
 version = "=2.1.1"
 features = ["thumbv7-backend"]
 
-[dependencies.rtic-sync]
-#path = "/home/cschuhen/rust/ref/rtic/rtic-sync"
-version = "=1.3.2"
-
 
 [dependencies]
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
