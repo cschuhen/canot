@@ -103,6 +103,9 @@ static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::n
 // Global static for data store (moved out of RTIC Shared resources)
 static APPDATA: application::DataStore = embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
 
+// Global static for ignition state (moved out of RTIC Shared resources)
+static IGNITION_STATE: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(true);
+
 // Global static for ignition pin (moved out of RTIC Local resources)
 // Using OnceLock with Mutex for safe shared access in preparation for embassy migration
 #[cfg(feature = "power_sensors")]
@@ -155,7 +158,6 @@ mod app {
 
     #[shared]
     struct Shared {
-        ignition_state: bool,
     }
 
     #[local]
@@ -406,7 +408,6 @@ mod app {
         (
             // Return Shared resources
             Shared {
-                ignition_state: true,
             },
             // Return Local resources
             Local {
@@ -477,16 +478,16 @@ mod app {
         }
     }
 
-    #[task(priority=2, shared = [ignition_state])]
-    async fn blink(mut cx: blink::Context, led: &mut crate::bsp::OutputPin) {
+    #[task(priority=2)]
+    async fn blink(_cx: blink::Context, led: &mut crate::bsp::OutputPin) {
         let mut delay = Delay {};
         loop {
             led.set_high();
             delay.delay_ms(5).await;
 
             led.set_low();
-            let ignition_state = cx.shared.ignition_state.lock(|is| *is);
-            if ignition_state {
+            let ignition_state = IGNITION_STATE.lock().await;
+            if *ignition_state {
                 delay.delay_ms(1000).await;
             } else {
                 delay.delay_ms(60000).await;
@@ -494,9 +495,9 @@ mod app {
         }
     }
 
-    #[task(priority=1, shared=[ignition_state])]
+    #[task(priority=1)]
     #[allow(unused_mut)]
-    async fn ignition_task(mut cx: ignition_task::Context, mut cansleep: Output<'static>) {
+    async fn ignition_task(_cx: ignition_task::Context, mut cansleep: Output<'static>) {
         #[cfg(feature = "power_sensors")]
         {
             let mut enabled = true;
@@ -522,7 +523,7 @@ mod app {
                             cansleep.set_high();
                         }
 
-                        cx.shared.ignition_state.lock(|is| *is = enabled);
+                        *IGNITION_STATE.lock().await = enabled;
 
                         CAN_SUSPENDED_SENDER.get().await.send(MainEvent::CanEnabled(enabled)).await;
                     }
@@ -532,7 +533,6 @@ mod app {
     }
         #[cfg(not(feature = "power_sensors"))]
         {
-            let _cx = &cx;
             let _cansleep = &mut cansleep;
         }
     }
