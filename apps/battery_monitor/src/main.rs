@@ -35,8 +35,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 #[cfg(feature = "power_sensors")]
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can;
-#[cfg(feature = "power_sensors")]
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
 use static_cell::StaticCell;
 #[cfg(any(feature = "power_sensors", feature = "terminal"))]
 use embassy_sync::channel::Sender;
@@ -94,7 +93,7 @@ struct EncoderArgs(
 
 #[cfg(feature = "power_sensors")]
 struct PowerSensorArgs(
-    &'static Mutex<NoopRawMutex, bsp::SensorI2c>,
+    &'static Mutex<CriticalSectionRawMutex, bsp::SensorI2c>,
     MonitorInterfaces,
     bsp::MonitorAlertPins,
     Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
@@ -132,6 +131,13 @@ static APP: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, cra
 #[cfg(feature = "terminal")]
 static ENCODER_ARGS: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, EncoderArgs>> = embassy_sync::once_lock::OnceLock::new();
 
+// Global static for power sensors args (moved out of RTIC Local resources)
+// Using OnceLock with Mutex since PowerSensorArgs needs interior mutability
+// Switched from NoopRawMutex to CriticalSectionRawMutex for the I2C bus reference
+// so that PowerSensorArgs implements Send+Sync and can be used in global statics
+#[cfg(feature = "power_sensors")]
+static POWER_SENSORS: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, PowerSensorArgs>> = embassy_sync::once_lock::OnceLock::new();
+
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
 // (only accessed by ignition_task, no concurrency concerns)
 
@@ -160,8 +166,8 @@ mod app {
         cansleep: crate::bsp::OutputPin,
         //rtc: Rtc,
         //app: crate::application::MonitorApp,
-        #[cfg(feature = "power_sensors")]
-        power_sensors: PowerSensorArgs,
+        //#[cfg(feature = "power_sensors")]
+        //power_sensors: PowerSensorArgs,
         //i2c_devices: MonitorInterfaces,
         //mon_alert_pins: bsp::MonitorAlertPins,
         //mon_obs_event_sender: Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
@@ -249,7 +255,7 @@ mod app {
 
         // Setup I2C Bus manager (async I2c, blocking methods work during init)
         #[cfg(feature = "power_sensors")]
-        static I2C_BUS: StaticCell<Mutex<NoopRawMutex, bsp::SensorI2c>> =
+        static I2C_BUS: StaticCell<Mutex<CriticalSectionRawMutex, bsp::SensorI2c>> =
             StaticCell::new();
         #[cfg(feature = "power_sensors")]
         let i2c_manager = {
@@ -370,6 +376,18 @@ mod app {
             ENCODER_ARGS.get_or_init(|| Mutex::new(_encoder_args));
         }
 
+        // Initialize power sensors as global static (moved out of RTIC Local)
+        #[cfg(feature = "power_sensors")]
+        {
+            let _power_sensors = PowerSensorArgs(
+                i2c_manager,
+                i2c_devices,
+                mon_alert_pins,
+                main_event_sender.clone(),
+            );
+            POWER_SENSORS.get_or_init(|| Mutex::new(_power_sensors));
+        }
+
         if let Err(_) = main_task::spawn(args, main_event_receiver) {
             error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
@@ -394,13 +412,13 @@ mod app {
                 cansleep,
                 //rtc,
                 //app,
-                #[cfg(feature = "power_sensors")]
-                power_sensors: PowerSensorArgs(
-                    i2c_manager,
-                    i2c_devices,
-                    mon_alert_pins,
-                    main_event_sender.clone(),
-                ),
+                //#[cfg(feature = "power_sensors")]
+                //power_sensors: PowerSensorArgs(
+                //    i2c_manager,
+                //    i2c_devices,
+                //    mon_alert_pins,
+                //    main_event_sender.clone(),
+                //),
                 //i2c_devices,
                 //mon_alert_pins,
                 //mon_obs_event_sender: main_event_sender.clone(),
@@ -726,11 +744,12 @@ mod app {
     }
 
     #[allow(unused_mut, unused_variables)]
-    #[task(priority=3, local = [power_sensors])]
+    #[task(priority=3)]
     async fn i2c_task(mut cx: i2c_task::Context) {
         #[cfg(feature = "power_sensors")]
         {
-            let PowerSensorArgs(_i2c_manager, devices, _alert_pins, _event_sender) = &mut cx.local.power_sensors;
+            let mut guard = POWER_SENSORS.get().await.lock().await;
+            let PowerSensorArgs(_i2c_manager, devices, _alert_pins, _event_sender) = &mut *guard;
 
             // Verify each device and configure it (runs once at startup)
             // Collect indices to remove first to avoid borrow issues
@@ -783,7 +802,7 @@ mod app {
             defmt::println!("Power sensors: {} devices found", devices.len());
 
             // Now enter the alert-driven monitoring loop
-            run_power_sensors(cx.local.power_sensors).await;
+            run_power_sensors(&mut *guard).await;
         }
     }
 

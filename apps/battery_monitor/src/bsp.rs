@@ -5,7 +5,7 @@ use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::mode;
 use embassy_stm32::peripherals::*;
 use embassy_stm32::{bind_interrupts, can, i2c, peripherals, spi};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
 use j1939_async as j1939;
 
 bind_interrupts!(struct CanIrqs {
@@ -29,7 +29,7 @@ pub type NvI2c = embassy_stm32::i2c::I2c<'static, mode::Blocking, embassy_stm32:
 pub type SensorI2c =
     embassy_stm32::i2c::I2c<'static, mode::Async, embassy_stm32::i2c::mode::Master>;
 #[allow(dead_code)]
-pub type SensorDevice = I2cDevice<'static, NoopRawMutex, SensorI2c>;
+pub type SensorDevice = I2cDevice<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, SensorI2c>;
 pub type OutputPin = Output<'static>;
 pub type Crc = embassy_stm32::crc::Crc<'static>;
 
