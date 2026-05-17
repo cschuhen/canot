@@ -146,6 +146,7 @@ mod app {
 
     //use embassy_stm32::can::BusError;
 
+    use embassy_stm32::gpio::Output;
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
     use embassy_sync::channel::{Channel, Receiver};
     use embassy_time::Delay;
@@ -163,7 +164,7 @@ mod app {
     #[local]
     struct Local {
         //can_iface: can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
-        cansleep: crate::bsp::OutputPin,
+        //cansleep moved to ignition_task via spawn argument
         //rtc: Rtc,
         //app: crate::application::MonitorApp,
         //#[cfg(feature = "power_sensors")]
@@ -184,7 +185,7 @@ mod app {
         let bsp::Bsp(
             device_id,
             mut can_iface,
-            mut cansleep,
+            cansleep,
             mut ignition_pin,
             mut leds,
             nvstore_i2c,
@@ -400,6 +401,14 @@ mod app {
             }
         }
 
+        // Spawn ignition_task with cansleep as argument (moved from main_task)
+        match ignition_task::spawn(cansleep) {
+            Ok(_) => {}
+            Err(_) => {
+                error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            }
+        }
+
         (
             // Return Shared resources
             Shared {
@@ -409,7 +418,7 @@ mod app {
             // Return Local resources
             Local {
                 //can_iface,
-                cansleep,
+                //cansleep moved to ignition_task via spawn argument above
                 //rtc,
                 //app,
                 //#[cfg(feature = "power_sensors")]
@@ -501,9 +510,9 @@ mod app {
         }
     }
 
-    #[task(priority=1, shared=[ignition_state], local = [cansleep])]
+    #[task(priority=1, shared=[ignition_state])]
     #[allow(unused_mut)]
-    async fn ignition_task(mut cx: ignition_task::Context) {
+    async fn ignition_task(mut cx: ignition_task::Context, mut cansleep: Output<'static>) {
         #[cfg(feature = "power_sensors")]
         {
             let mut enabled = true;
@@ -523,10 +532,10 @@ mod app {
                         enabled = ignition;
 
                         if enabled {
-                            cx.local.cansleep.set_low();
+                            cansleep.set_low();
                             delay.delay_ms(100).await;
                         } else {
-                            cx.local.cansleep.set_high();
+                            cansleep.set_high();
                         }
 
                         cx.shared.ignition_state.lock(|is| *is = enabled);
@@ -540,6 +549,7 @@ mod app {
         #[cfg(not(feature = "power_sensors"))]
         {
             let _cx = &cx;
+            let _cansleep = &mut cansleep;
         }
     }
 
@@ -671,16 +681,7 @@ mod app {
             }
         }
 
-        // Schedule the blinking task
-        match ignition_task::spawn() {
-            Ok(_) => {}
-            Err(_) => {
-                {
-                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
-                    guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
-                }
-            }
-        }
+
 
         use embassy_futures::select::{select, Either};
 
