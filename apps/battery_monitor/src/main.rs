@@ -123,6 +123,10 @@ static CAN_IFACE: embassy_sync::once_lock::OnceLock<can::BufferedCan<'static, CA
 // Using OnceLock with Mutex since BufferedCanErrorSender needs interior mutability
 static MAIN_ERROR_SENDER: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, crate::bsp::BufferedCanErrorSender>> = embassy_sync::once_lock::OnceLock::new();
 
+// Global static for application (moved out of RTIC Local resources)
+// Using OnceLock with Mutex since MonitorApp needs interior mutability
+static APP: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, crate::application::MonitorApp>> = embassy_sync::once_lock::OnceLock::new();
+
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
 // (only accessed by ignition_task, no concurrency concerns)
 
@@ -150,7 +154,7 @@ mod app {
         //can_iface: can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
         cansleep: crate::bsp::OutputPin,
         //rtc: Rtc,
-        app: crate::application::MonitorApp,
+        //app: crate::application::MonitorApp,
         #[cfg(feature = "power_sensors")]
         power_sensors: PowerSensorArgs,
         //i2c_devices: MonitorInterfaces,
@@ -324,6 +328,8 @@ mod app {
             display_reset_pin,
             &APPDATA,
         );
+        // Initialize app as global static (moved out of RTIC Local)
+        APP.get_or_init(|| Mutex::new(app));
 
         static MAIN_CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> =
             StaticCell::new();
@@ -371,7 +377,7 @@ mod app {
                 //can_iface,
                 cansleep,
                 //rtc,
-                app,
+                //app,
                 #[cfg(feature = "power_sensors")]
                 power_sensors: PowerSensorArgs(
                     i2c_manager,
@@ -544,7 +550,7 @@ mod app {
         Ok(ret)
     }
 
-    #[task(priority=2, local = [app], shared=[data_store])]
+    #[task(priority=2, shared=[data_store])]
     async fn main_task(
         mut cx: main_task::Context,
         mut args: MainArgs,
@@ -618,14 +624,17 @@ mod app {
             }
         }
 
-        match cx.local.app.init().await {
-            Err(err) => {
-                {
-                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
-                    guard.send(&err);
+        {
+            let mut guard = APP.get().await.lock().await;
+            match guard.init().await {
+                Err(err) => {
+                    {
+                        let mut error_guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                        error_guard.send(&err);
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
 
         // Schedule the blinking task
@@ -642,16 +651,24 @@ mod app {
         use embassy_futures::select::{select, Either};
 
         loop {
-            let ret = select(events.receive(), cx.local.app.run()).await;
+            let ret = select(events.receive(), async {
+                let mut guard = APP.get().await.lock().await;
+                if let Err(e) = guard.run().await {
+                    {
+                        let mut error_guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                        error_guard.send(&e);
+                    }
+                }
+            }).await;
 
             match ret {
                 Either::First(event) => {
-                    cx.local.app.on_event(&event).await;
+                    {
+                        let mut guard = APP.get().await.lock().await;
+                        guard.on_event(&event).await;
+                    }
                 }
-                Either::Second(Ok(())) => {}
-                Either::Second(Err(e)) => {
-                    cx.local.app.on_error(e);
-                }
+                Either::Second(()) => {}
             }
         }
     }
