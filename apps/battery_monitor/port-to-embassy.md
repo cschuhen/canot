@@ -153,13 +153,29 @@
 
 The following items were considered but kept in RTIC's Local resources:
 
-1. **main_error_sender (BufferedCanErrorSender):** Only used by main_task, no sharing needed across tasks
-2. **cansleep (OutputPin):** OutputPin doesn't implement Sync, can't be used with OnceLock/Mutex patterns
-3. **app (MonitorApp):** Only used by main_task, no sharing needed
-4. **power_sensors (PowerSensorArgs):** Feature-gated, complex struct with multiple fields
-5. **encoder_args (EncoderArgs):** Feature-gated for terminal feature only
+1. **cansleep (OutputPin):** OutputPin doesn't implement Sync, can't be used with OnceLock/Mutex patterns for global statics. Only accessed by ignition_task, no concurrency concerns.
+2. **power_sensors (PowerSensorArgs):** Contains `&'static Mutex<NoopRawMutex, bsp::SensorI2c>` which requires NoopRawMutex (not Sync). The struct is not Send+Sync compatible for global static storage. Feature-gated and complex with multiple fields.
 
-**Rationale:** For embassy migration preparation, the key is moving resources that need to be shared across tasks or accessed from async contexts without RTIC's local resource mechanism. Single-task resources don't benefit as much from being moved to global statics.
+**Rationale:** For embassy migration preparation, the key is moving resources that need to be shared across tasks or accessed from async contexts without RTIC's local resource mechanism. Items that:
+- Don't implement Sync (can't be used in global statics)
+- Are only used by a single task (no sharing benefit)
+- Have complex lifetime requirements with non-Sync synchronization primitives
+...are best kept in Local resources.
+
+### Final State of RTIC Local Resources
+
+After all migrations, the following items remain in RTIC's Local struct:
+
+```rust
+#[local]
+struct Local {
+    cansleep: crate::bsp::OutputPin,
+    #[cfg(feature = "power_sensors")]
+    power_sensors: PowerSensorArgs,
+}
+```
+
+Both items have valid reasons for remaining in Local and cannot be practically moved to global statics due to trait bound requirements.
 
 ---
 
