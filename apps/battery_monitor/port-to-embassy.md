@@ -154,12 +154,10 @@
 The following items were considered but kept in RTIC's Local resources:
 
 1. **cansleep (OutputPin):** OutputPin doesn't implement Sync, can't be used with OnceLock/Mutex patterns for global statics. Only accessed by ignition_task, no concurrency concerns.
-2. **power_sensors (PowerSensorArgs):** Contains `&'static Mutex<NoopRawMutex, bsp::SensorI2c>` which requires NoopRawMutex (not Sync). The struct is not Send+Sync compatible for global static storage. Feature-gated and complex with multiple fields.
 
 **Rationale:** For embassy migration preparation, the key is moving resources that need to be shared across tasks or accessed from async contexts without RTIC's local resource mechanism. Items that:
 - Don't implement Sync (can't be used in global statics)
 - Are only used by a single task (no sharing benefit)
-- Have complex lifetime requirements with non-Sync synchronization primitives
 ...are best kept in Local resources.
 
 ### Final State of RTIC Local Resources
@@ -170,12 +168,76 @@ After all migrations, the following items remain in RTIC's Local struct:
 #[local]
 struct Local {
     cansleep: crate::bsp::OutputPin,
-    #[cfg(feature = "power_sensors")]
-    power_sensors: PowerSensorArgs,
 }
 ```
 
-Both items have valid reasons for remaining in Local and cannot be practically moved to global statics due to trait bound requirements.
+Only `cansleep` remains because OutputPin doesn't implement Sync and cannot be used with OnceLock/Mutex patterns for global statics.
+
+---
+
+### Power Sensors Migration to Global Static (2026-05-16)
+
+**Goal:** Move `power_sensors` out of RTIC's Local resources into a global static.
+
+**Challenge:** The original `PowerSensorArgs` struct used `NoopRawMutex` for the I2C bus reference:
+```rust
+struct PowerSensorArgs(
+    &'static Mutex<NoopRawMutex, bsp::SensorI2c>,
+    MonitorInterfaces,
+    bsp::MonitorAlertPins,
+    Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
+);
+```
+
+`NoopRawMutex` doesn't implement `Sync`, which prevented the entire struct from being used in a global static (OnceLock requires Send+Sync types).
+
+**Solution:** Switched from `NoopRawMutex` to `CriticalSectionRawMutex` for the I2C bus reference:
+- `CriticalSectionRawMutex` implements both `Send` and `Sync`
+- This is actually better practice since it provides proper synchronization when multiple tasks access the I2C bus concurrently
+- The individual INA226 chip devices (`SensorDevice`) still use `NoopRawMutex` since each chip gets its own `I2cDevice` wrapper with no sharing needed per-chip
+
+**Changes Made:**
+
+1. **Updated bsp.rs type definitions:**
+   - Changed `SensorDevice` to use `CriticalSectionRawMutex` instead of `NoopRawMutex`
+   - Removed unused `NoopRawMutex` import from bsp.rs
+
+2. **Added OnceLock import and static declaration in main.rs:**
+   ```rust
+   #[cfg(feature = "power_sensors")]
+   static POWER_SENSORS: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, PowerSensorArgs>> = embassy_sync::once_lock::OnceLock::new();
+   ```
+
+3. **Removed from RTIC Local struct:**
+   - Removed `power_sensors` from `Local` struct and init() return tuple
+
+4. **Initialize in init():**
+   ```rust
+   #[cfg(feature = "power_sensors")]
+   {
+       let _power_sensors = PowerSensorArgs(
+           i2c_manager,
+           i2c_devices,
+           mon_alert_pins,
+           main_event_sender.clone(),
+       );
+       POWER_SENSORS.get_or_init(|| Mutex::new(_power_sensors));
+   }
+   ```
+
+5. **Update i2c_task to use global static:**
+   - Removed `local = [power_sensors]` from task attribute
+   - Use `POWER_SENSORS.get().await.lock().await` pattern
+   - Destructure guard: `let PowerSensorArgs(...) = &mut *guard`
+
+**Key Design Decisions:**
+- **CriticalSectionRawMutex over NoopRawMutex:** Enables Send+Sync for the entire struct, making it compatible with global statics. Provides proper synchronization for concurrent I2C bus access.
+- **NoopRawMutex retained for SensorDevice:** Individual INA226 chip devices don't need synchronization since each gets its own wrapper.
+
+**Build Verification:**
+- ✅ Both build targets compile successfully:
+  - `--features=power_sensors`
+  - `--features=terminal`
 
 ---
 
