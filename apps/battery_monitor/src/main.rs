@@ -127,6 +127,11 @@ static MAIN_ERROR_SENDER: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectio
 // Using OnceLock with Mutex since MonitorApp needs interior mutability
 static APP: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, crate::application::MonitorApp>> = embassy_sync::once_lock::OnceLock::new();
 
+// Global static for encoder args (moved out of RTIC Local resources)
+// Using OnceLock with Mutex since EncoderArgs needs interior mutability
+#[cfg(feature = "terminal")]
+static ENCODER_ARGS: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, EncoderArgs>> = embassy_sync::once_lock::OnceLock::new();
+
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
 // (only accessed by ignition_task, no concurrency concerns)
 
@@ -161,8 +166,8 @@ mod app {
         //mon_alert_pins: bsp::MonitorAlertPins,
         //mon_obs_event_sender: Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
         //can_suspended_event_sender: Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
-        #[cfg(feature = "terminal")]
-        encoder_args: EncoderArgs,
+        //#[cfg(feature = "terminal")]
+        //encoder_args: EncoderArgs,
     }
 
     #[init]
@@ -354,6 +359,17 @@ mod app {
             nvs,
         };
 
+        // Initialize encoder args as global static (moved out of RTIC Local)
+        #[cfg(feature = "terminal")]
+        {
+            let _encoder_args = EncoderArgs(
+                encoder_pins,
+                main_event_sender.clone(),
+                error_sender.clone(),
+            );
+            ENCODER_ARGS.get_or_init(|| Mutex::new(_encoder_args));
+        }
+
         if let Err(_) = main_task::spawn(args, main_event_receiver) {
             error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
@@ -388,12 +404,12 @@ mod app {
                 //i2c_devices,
                 //mon_alert_pins,
                 //mon_obs_event_sender: main_event_sender.clone(),
-                #[cfg(feature = "terminal")]
-                encoder_args: EncoderArgs(
-                    encoder_pins,
-                    main_event_sender.clone(),
-                    error_sender.clone(),
-                ),
+                //#[cfg(feature = "terminal")]
+                //encoder_args: EncoderArgs(
+                //    encoder_pins,
+                //    main_event_sender.clone(),
+                //    error_sender.clone(),
+                //),
 
             },
         )
@@ -812,13 +828,16 @@ mod app {
     }
     //#[cfg(feature = "terminal")]
 
-    #[task(priority=1, local = [encoder_args])]
+    #[task(priority=1)]
     async fn encoder_task(cx: encoder_task::Context) {
         //let EncoderArgs(mut pins, mut sender, mut error_sender) = cx.local.encoder_args;
         //run_encoder(&mut pins, &mut sender, &mut error_sender).await;
         //let _dr = &cx.shared.dummy;
         #[cfg(feature = "terminal")]
-        run_encoder(cx.local.encoder_args).await;
+        {
+            let mut guard = ENCODER_ARGS.get().await.lock().await;
+            run_encoder(&mut *guard).await;
+        }
         // Avoid unused variable warning
         let _cx = &cx;
     }
