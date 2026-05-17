@@ -40,8 +40,8 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use static_cell::StaticCell;
 #[cfg(any(feature = "power_sensors", feature = "terminal"))]
 use embassy_sync::channel::Sender;
-#[cfg(feature = "power_sensors")]
 use embassy_sync::mutex::Mutex;
+
 #[cfg(feature = "power_sensors")]
 use embassy_sync::once_lock::OnceLock;
 
@@ -119,7 +119,9 @@ static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<Sender<'static, C
 // Using OnceLock since BufferedCan is Clone+Send and used by multiple tasks
 static CAN_IFACE: embassy_sync::once_lock::OnceLock<can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>> = embassy_sync::once_lock::OnceLock::new();
 
-// Main error sender - kept in Local (only used by main_task, no sharing needed)
+// Global static for main error sender (moved out of RTIC Local resources)
+// Using OnceLock with Mutex since BufferedCanErrorSender needs interior mutability
+static MAIN_ERROR_SENDER: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, crate::bsp::BufferedCanErrorSender>> = embassy_sync::once_lock::OnceLock::new();
 
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
 // (only accessed by ignition_task, no concurrency concerns)
@@ -145,7 +147,6 @@ mod app {
 
     #[local]
     struct Local {
-        main_error_sender: crate::bsp::BufferedCanErrorSender,
         //can_iface: can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
         cansleep: crate::bsp::OutputPin,
         //rtc: Rtc,
@@ -214,6 +215,8 @@ mod app {
         CAN_IFACE.get_or_init(|| can_iface);
 
         error_sender.report(FILE_CODE, ErrorCode::CheckPoint as u8, line!());
+        // Initialize main error sender as global static (moved out of RTIC Local)
+        MAIN_ERROR_SENDER.get_or_init(|| Mutex::new(error_sender.clone()));
 
         static APPDATA: application::DataStore =
             embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
@@ -385,7 +388,7 @@ mod app {
                     main_event_sender.clone(),
                     error_sender.clone(),
                 ),
-                main_error_sender: error_sender,
+
             },
         )
     }
@@ -541,7 +544,7 @@ mod app {
         Ok(ret)
     }
 
-    #[task(priority=2, local = [main_error_sender, app], shared=[data_store])]
+    #[task(priority=2, local = [app], shared=[data_store])]
     async fn main_task(
         mut cx: main_task::Context,
         mut args: MainArgs,
@@ -559,7 +562,10 @@ mod app {
                 .setup(args.ndevices, embassy_time::Instant::now())
                 .await
             {
-                Err(e) => cx.local.main_error_sender.send(&e),
+                Err(e) => {
+                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                    guard.send(&e);
+                },
                 _ => {}
             }
         }
@@ -580,29 +586,44 @@ mod app {
             }
             Ok(None) => {}
             Err(e) => {
-                cx.local.main_error_sender.send(&e);
+                {
+                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                    guard.send(&e);
+                }
                 //defmt::println!("Failed to initialize storage: {:?}", e);
             }
         }
 
         #[cfg(feature = "power_sensors")]
         if let Err(_) = i2c_task::spawn() {
-            cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            {
+                let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            }
         }
 
         if let Err(_) = start_flash::spawn(data_store, &NVSTORE) {
-            cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            {
+                let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            }
         }
 
         args.leds[4].set_high();
 
         if let Err(_) = blink::spawn(&mut args.leds[0]) {
-            cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            {
+                let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+            }
         }
 
         match cx.local.app.init().await {
             Err(err) => {
-                cx.local.main_error_sender.send(&err);
+                {
+                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                    guard.send(&err);
+                }
             }
             _ => {}
         }
@@ -611,7 +632,10 @@ mod app {
         match ignition_task::spawn() {
             Ok(_) => {}
             Err(_) => {
-                cx.local.main_error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+                {
+                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                    guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+                }
             }
         }
 
