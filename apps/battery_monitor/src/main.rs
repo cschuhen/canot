@@ -32,7 +32,6 @@ pub mod ui;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 #[cfg(feature = "power_sensors")]
-#[cfg(feature = "power_sensors")]
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can;
 
@@ -101,10 +100,9 @@ struct PowerSensorArgs(
 
 static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::new();
 
-// Global static for ignition pin (moved out of RTIC Local resources)
-// Using OnceLock with Mutex for safe shared access in preparation for embassy migration
-#[cfg(feature = "power_sensors")]
-#[cfg(feature = "power_sensors")]
+// Global static for data store (moved out of RTIC Shared resources)
+static APPDATA: application::DataStore = embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
+
 // Global static for ignition pin (moved out of RTIC Local resources)
 // Using OnceLock with Mutex for safe shared access in preparation for embassy migration
 #[cfg(feature = "power_sensors")]
@@ -157,7 +155,6 @@ mod app {
 
     #[shared]
     struct Shared {
-        data_store: &'static application::DataStore,
         ignition_state: bool,
     }
 
@@ -233,9 +230,6 @@ mod app {
         error_sender.report(FILE_CODE, ErrorCode::CheckPoint as u8, line!());
         // Initialize main error sender as global static (moved out of RTIC Local)
         MAIN_ERROR_SENDER.get_or_init(|| Mutex::new(error_sender.clone()));
-
-        static APPDATA: application::DataStore =
-            embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
 
         let _eeprom = {
             use eeprom24x::{Eeprom24x, SlaveAddr};
@@ -412,7 +406,6 @@ mod app {
         (
             // Return Shared resources
             Shared {
-                data_store: &APPDATA,
                 ignition_state: true,
             },
             // Return Local resources
@@ -458,20 +451,18 @@ mod app {
     #[task(priority = 1)]
     async fn start_flash(
         _cx: start_flash::Context,
-        data_store: &'static crate::application::DataStore,
         shared_nvs: &'static nvstore::SharedNvStore,
     ) {
         #[cfg(feature = "power_sensors")]
         loop {
             let mut header = nvstore::power_sensors::Header::new();
-            let mut delay = Delay {};
-            delay.delay_ms(60000).await;
+            Delay {}.delay_ms(60000).await;
             let now = embassy_time::Instant::now();
             defmt::println!("Try Store observation");
 
             header.time += 10;
             match shared_nvs
-                .store_monitor_observation(data_store, now, &header)
+                .store_monitor_observation(&APPDATA, now, &header)
                 .await
             {
                 Ok(()) => {}
@@ -479,16 +470,9 @@ mod app {
                     defmt::println!("Error storing Mon Data {:?}", e);
                 }
             };
-            /*match nvs.store_dirty_settings().await {
-                Ok(()) => {}
-                Err(e) => {
-                    defmt::println!("Error storing Mon Settings {:?}", e);
-                }
-            }*/
         }
         #[cfg(not(feature = "power_sensors"))]
         {
-            let _ds = data_store;
             let _nvs = shared_nvs;
         }
     }
@@ -555,7 +539,6 @@ mod app {
 
     async fn init_storage(
         shared_nvs: &nvstore::SharedNvStore,
-        data_store: &'static crate::application::DataStore,
         leds: &mut crate::bsp::Leds,
     ) -> Result<Option<i64>, j1939::error::Error> {
         leds[0].set_low();
@@ -576,7 +559,7 @@ mod app {
         let ret = {
             let mut header = nvstore::power_sensors::Header::new();
             match nvs
-                .load_last_monitor_observation(data_store, -1, &mut header)
+                .load_last_monitor_observation(&APPDATA, -1, &mut header)
                 .await?
             {
                 true => Some(header.time),
@@ -584,29 +567,25 @@ mod app {
             }
         };
         #[cfg(not(feature = "power_sensors"))]
-        let ret: Option<i64> = {
-            let _ds = data_store;
-            None
-        };
+        let ret: Option<i64> = None;
 
         leds[3].set_high();
 
         Ok(ret)
     }
 
-    #[task(priority=2, shared=[data_store])]
+    #[task(priority=2)]
     async fn main_task(
-        mut cx: main_task::Context,
+        _cx: main_task::Context,
         mut args: MainArgs,
         events: Receiver<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
     ) {
-        let data_store = cx.shared.data_store.lock(|shared| *shared);
 
         *(NVSTORE.nv.lock().await) = Some(args.nvs);
 
         #[cfg(feature = "power_sensors")]
         {
-            let mut unlocked = data_store.lock().await;
+            let mut unlocked = APPDATA.lock().await;
             match unlocked
                 .monitors
                 .setup(args.ndevices, embassy_time::Instant::now())
@@ -622,7 +601,7 @@ mod app {
 
         //nvs.erase_pd().await.unwrap();
 
-        match init_storage(&NVSTORE, data_store, &mut args.leds).await {
+        match init_storage(&NVSTORE, &mut args.leds).await {
             Ok(Some(_time)) => {
                 /*let unlocked = data_store.lock().await;
                 defmt::println!(
@@ -652,7 +631,7 @@ mod app {
             }
         }
 
-        if let Err(_) = start_flash::spawn(data_store, &NVSTORE) {
+        if let Err(_) = start_flash::spawn(&NVSTORE) {
             {
                 let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
                 guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
