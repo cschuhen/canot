@@ -231,13 +231,200 @@ struct PowerSensorArgs(
    - Destructure guard: `let PowerSensorArgs(...) = &mut *guard`
 
 **Key Design Decisions:**
-- **CriticalSectionRawMutex over NoopRawMutex:** Enables Send+Sync for the entire struct, making it compatible with global statics. Provides proper synchronization for concurrent I2C bus access.
+u
 - **NoopRawMutex retained for SensorDevice:** Individual INA226 chip devices don't need synchronization since each gets its own wrapper.
 
 **Build Verification:**
 - ✅ Both build targets compile successfully:
   - `--features=power_sensors`
   - `--features=terminal`
+
+---
+
+### Embassy Executor Port (Final Migration) — 2026-05-18
+
+**Goal:** Complete the migration from RTIC to `embassy-executor`, removing all RTIC framework dependencies.
+
+---
+
+#### Phase 1: Build Verification & Dependency Updates
+
+**Changes Made:**
+
+1. **Updated Cargo.toml dependencies:**
+   - Removed `rtic` and `rtic-monotonics` dependencies
+   - Added `embassy-executor = { version = "0.6", features = ["nightly", "task-arena-size-32768"] }`
+   - Added `embassy-time = { version = "0.4", features = ["defmt", "tick-hz-32_768", "defmt-timestamp-use-realtimeclock"] }`
+   - Updated `embassy-stm32` to `0.1.0`
+   - Added `async-debounce = "0.3"` for input debouncing
+   - Removed `rtic-sync` dependency (already replaced earlier)
+
+2. **Updated imports in main.rs:**
+   - Replaced RTIC imports (`#[app]`, `SharedCell`, `init`, etc.) with embassy equivalents
+   - Added `embassy_executor::{raw::Executor, Spawner}` for executor and task spawning
+   - Added `embassy_sync::once_lock::OnceLock` for async-initialized globals
+   - Added `embassy_futures::select::{select, select3, Either, Either3}` for async composition
+   - Added `static_cell::StaticCell` for static initialization
+
+---
+
+#### Phase 2: Executor Integration
+
+**Changes Made:**
+
+1. **Replaced RTIC `#[app]` with embassy `#[main]`:**
+   ```rust
+   // Before (RTIC):
+   #[app(Shared = Shared, Local = Local, resources_init = fn init(...) -> ...)]
+   const APP: app::App = app::App {};
+   
+   // After (Embassy):
+   static mut EXECUTOR: Option<Executor> = None;
+   
+   #[embassy_executor::main]
+   async fn main(spawner: Spawner) {
+       // Executor auto-initialized by #[main] macro
+       ...
+   }
+   ```
+
+2. **Removed manual executor initialization:** The `#[main]` macro handles executor setup automatically, including signal_fn/signal_ctx for interrupt-based wakeup.
+
+3. **Replaced RTIC task spawning:**
+   - Used `spawner.must_spawn(task())` to spawn embassy tasks from main
+   - Tasks use `#[embassy_executor::task]` attribute instead of RTIC's `[resources = ...]`
+
+---
+
+#### Phase 3: Task Conversion
+
+**Changes Made:**
+
+1. **init_main_task → async task:**
+   ```rust
+   #[embassy_executor::task]
+   async fn init_main_task() {
+       // App initialization and main event loop
+       let mut guard = APP.get().await.lock().await;
+       match guard.init().await { ... }
+       
+       loop {
+           use embassy_futures::select::{select, Either};
+           let ret = select(events.receive(), async { guard.run().await }).await;
+           // Handle events or app completion
+       }
+   }
+   ```
+
+2. **encoder_task → async task:**
+   - Used raw pointers to get mutable access to array elements for `select3` (embassy's ExtiInput::wait_for_any_edge requires &mut self)
+   - Updated `is_high()` calls: embassy returns `Result<bool, Infallible>` instead of RTIC's `bool`
+   - Removed debounce wrapper (async-debounce 0.3 doesn't work with borrowed pins in this context)
+   - Feature-gated behind `#[cfg(feature = "terminal")]` since encoder is only used with display
+
+3. **ignition_task → async task:**
+   - Uses global `IGNITION_PIN` static via `get().await.lock().await`
+   - Manual 10ms debounce delay (same as previous RTIC migration)
+   - Feature-gated behind `#[cfg(feature = "power_sensors")]`
+
+4. **i2c_task → async task:**
+   - Uses global `POWER_SENSORS` static via `get().await.lock().await`
+   - Uses raw pointers for `select4` on alert pins (same pattern as encoder)
+   - Feature-gated behind `#[cfg(feature = "power_sensors")]`
+
+---
+
+#### Phase 4: Static State Migration
+
+**Changes Made:**
+
+1. **Global statics (already prepared in previous migrations):**
+   ```rust
+   static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::new();
+   static CAN_IFACE: OnceLock<can::BufferedCan<'static, ...>> = OnceLock::new();
+   static MAIN_ERROR_SENDER: OnceLock<Mutex<CriticalSectionRawMutex, BufferedCanErrorSender>> = OnceLock::new();
+   static APP: OnceLock<Mutex<CriticalSectionRawMutex, MonitorApp>> = OnceLock::new();
+   static CAN_SUSPENDED_SENDER: OnceLock<Sender<'static, ...>> = OnceLock::new();
+   #[cfg(feature = "power_sensors")]
+   static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, ExtiPin>> = OnceLock::new();
+   #[cfg(feature = "power_sensors")]
+   static POWER_SENSORS: OnceLock<Mutex<CriticalSectionRawMutex, (...)>> = OnceLock::new();
+   #[cfg(feature = "terminal")]
+   static ENCODER_ARGS: OnceLock<Mutex<CriticalSectionRawMutex, (...)>> = OnceLock::new();
+   ```
+
+2. **Removed RTIC Shared/Local structures entirely:**
+   - No more `SharedCell`, `#[shared]`, or `#[local]` attributes
+   - All shared state uses global statics with `OnceLock` + `Mutex`
+
+3. **NV Store initialization moved to async context:**
+   ```rust
+   let nvs = nvstore::NvStore::new(flash_resources, #[cfg(feature = "power_sensors")] crc);
+   *(NVSTORE.nv.lock().await) = Some(nvs);
+   ```
+
+---
+
+#### Phase 5: RTIC Removal
+
+**Changes Made:**
+
+1. **Removed all RTIC attributes and macros:**
+   - `#[app(...)]` → `#[embassy_executor::main]`
+   - `[resources = ...]` on tasks → removed (tasks access globals directly)
+   - `init()` function → replaced by async `main()`
+
+2. **Removed RTIC-specific code:**
+   - Resource destructuring from init() return tuple → direct Bsp::new() destructuring in main()
+   - RTIC channel API (`make_channel`, `.recv().await`) → embassy sync API (`Channel::new()`, `.receive().await`)
+
+3. **Cleaned up unused imports:**
+   - Removed `rtic`, `rtic_monotonics`, `rtic_sync` imports
+   - Kept only embassy and standard library imports needed for the new architecture
+
+---
+
+#### Key Design Decisions
+
+1. **OnceLock over StaticCell:** All global state uses `embassy_sync::once_lock::OnceLock` because it provides async `.get().await`, which is essential for embassy-style initialization where tasks may need to access globals before they're fully initialized.
+
+2. **Raw pointers for select() on arrays:** Embassy's `ExtiInput::wait_for_any_edge()` requires `&mut self`. When pins are stored in an array behind a shared reference, we use raw pointer arithmetic (`pins_ptr.add(i)`) to create non-overlapping mutable references. This is safe because each future accesses a distinct array element.
+
+3. **Feature-gated tasks:** Tasks that only apply to specific features (encoder for `terminal`, ignition/i2c for `power_sensors`) are conditionally compiled with separate task definitions:
+   ```rust
+   #[cfg(feature = "terminal")]
+   #[embassy_executor::task]
+   async fn encoder_task() { ... }
+   
+   #[cfg(not(feature = "terminal"))]
+   #[embassy_executor::task]
+   async fn encoder_task() {
+       loop { embassy_time::Timer::after(...).await; }
+   }
+   ```
+
+4. **No executor run loop needed:** The `#[main]` macro automatically runs the executor's event loop. We don't need to manually call `executor.run()` as was required in earlier embassy versions.
+
+5. **Mutex for shared state:** All global statics that may be accessed by multiple tasks are wrapped in `embassy_sync::mutex::Mutex<CriticalSectionRawMutex, T>` for safe concurrent access.
+
+---
+
+#### Build Verification
+
+- ✅ Both build targets compile successfully with zero errors:
+  - `cargo build --release --features=power_sensors`
+  - `cargo build --release --features=terminal`
+
+- Remaining warnings are all expected:
+  - Unused variables for feature-gated destructured fields (Rust doesn't support `#[cfg]` on individual tuple struct fields in patterns)
+  - Dead code warnings for statics that are only used with specific features
+
+---
+
+#### Files Modified
+
+- `/home/cschuhen/rust/canot/apps/battery_monitor/Cargo.toml` — Updated dependencies
+- `/home/cschuhen/rust/canot/apps/battery_monitor/src/main.rs` — Complete RTIC → Embassy migration
 
 ---
 
