@@ -241,12 +241,12 @@ impl Monitors {
         Monitors { monitors, nvstore }
     }
 
-    pub fn monitor(&self, idx: usize) -> &Monitor {
-        &self.monitors[idx]
+    pub fn monitor(&self, idx: usize) -> Option<&Monitor> {
+        self.monitors.get(idx)
     }
 
-    pub fn monitor_as_mut(&mut self, idx: usize) -> &mut Monitor {
-        &mut self.monitors[idx]
+    pub fn monitor_as_mut(&mut self, idx: usize) -> Option<&mut Monitor> {
+        self.monitors.get_mut(idx)
     }
 
     pub fn init_data(&mut self, idx: usize, resistance_u: i32, charge_a_h: f64) {

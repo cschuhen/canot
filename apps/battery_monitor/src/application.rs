@@ -567,11 +567,14 @@ impl MonitorApp {
         let (charge, current, voltage) = {
             let mut unlocked = self.data_store.lock().await;
             unlocked.monitors.handle_observation(time, obs)?;
-            (
-                unlocked.monitors.monitor(idx).total_charge_uah(),
-                unlocked.monitors.monitor(idx).current_ua(),
-                unlocked.monitors.monitor(idx).bus_voltage_uv(),
-            )
+            match unlocked.monitors.monitor(idx) {
+                Some(mon) => (
+                    mon.total_charge_uah(),
+                    mon.current_ua(),
+                    mon.bus_voltage_uv(),
+                ),
+                None => return Ok(false),
+            }
         };
 
         self.stack

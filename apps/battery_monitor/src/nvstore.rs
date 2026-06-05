@@ -329,16 +329,19 @@ impl NvStore {
             state.time_mut().write(header.time);
         }
         for i in 0..power_sensors::NUM_MONITORS {
+            if i >= ds.monitors.len() {
+                break;
+            }
             let mut state = power_sensors::record_one_monitor::View::new(
                 &mut data[power_sensors::HEADER_SIZE + i * power_sensors::OBSERVATION_SIZE..],
             );
-            let mon = ds.monitors.monitor(i);
-
-            state
-                .total_charge_ua_ms_mut()
-                .write(mon.total_charge_ua_ms());
-            state.charge_in_ua_ms_mut().write(mon.charge_in_ua_ms());
-            state.charge_out_ua_ms_mut().write(mon.charge_out_ua_ms());
+            if let Some(mon) = ds.monitors.monitor(i) {
+                state
+                    .total_charge_ua_ms_mut()
+                    .write(mon.total_charge_ua_ms());
+                state.charge_in_ua_ms_mut().write(mon.charge_in_ua_ms());
+                state.charge_out_ua_ms_mut().write(mon.charge_out_ua_ms());
+            }
         }
 
         Ok(())
@@ -490,10 +493,16 @@ impl NvStore {
         }
 
         for i in 0..power_sensors::NUM_MONITORS {
+            if i >= unlocked.monitors.len() {
+                break;
+            }
             let state = power_sensors::record_one_monitor::View::new(
                 &data[power_sensors::HEADER_SIZE + i * power_sensors::OBSERVATION_SIZE..],
             );
-            let mon = unlocked.monitors.monitor_as_mut(i);
+            let mon = unlocked
+                .monitors
+                .monitor_as_mut(i)
+                .expect("bounds checked above");
             mon.set_total_charge_ua_ms(state.total_charge_ua_ms().read());
             mon.set_charge_in_ua_ms(state.charge_in_ua_ms().read());
             mon.set_charge_out_ua_ms(state.charge_out_ua_ms().read());
