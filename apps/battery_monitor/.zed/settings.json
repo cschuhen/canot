@@ -11,7 +11,7 @@
         "diagnostics": {
           "experimental": {
             //"enable": true
-          }
+          },
         },
         //"check.allTargets": false,
         //"check.noDefaultFeatures": true,
@@ -25,14 +25,17 @@
           "rust-analyzer.cargo.noDefaultFeatures": true,
 
           //"features": ["js1", "terminal"]
-          "features": ["js1", "battery_monitor"]
-          //  "allTargets": false
-        }
+          //"features": ["js1", "battery_monitor"]
+          "features": ["terminal", "power_sensors"],
+          "allTargets": false,
+        },
         // Use `-p` instead of `--workspace` for cargo check
-        //"check": {
-        //  "workspace": false
-        //}
-      }
-    }
-  }
+        "check": {
+          "command": "check",
+          "extraArgs": ["--all-targets"],
+          //"workspace": false
+        },
+      },
+    },
+  },
 }

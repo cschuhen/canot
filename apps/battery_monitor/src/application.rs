@@ -1,3 +1,5 @@
+pub const MAIN_EVENT_CAPACITY: usize = 9;
+
 use crate::error::*;
 use embassy_stm32::can;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -682,5 +684,41 @@ impl MonitorApp {
             },
         }
         Ok(())
+    }
+
+    /// App init + event loop.
+    /// Called from main_task after all background tasks are spawned.
+    pub async fn run_loop(
+        &mut self,
+        events: embassy_sync::channel::Receiver<
+            'static,
+            CriticalSectionRawMutex,
+            MainEvent,
+            { crate::MAIN_EVENT_CAPACITY },
+        >,
+    ) {
+        // Init
+        if let Err(err) = self.init().await {
+            self.on_error(err);
+            return;
+        }
+
+        use embassy_futures::select::{select, Either};
+
+        loop {
+            let ret = select(events.receive(), async {
+                if let Err(e) = self.run().await {
+                    self.on_error(e);
+                }
+            })
+            .await;
+
+            match ret {
+                Either::First(event) => {
+                    self.on_event(&event).await;
+                }
+                Either::Second(()) => {}
+            }
+        }
     }
 }
