@@ -700,61 +700,9 @@ mod app {
         #[cfg(feature = "power_sensors")]
         {
             let mut guard = POWER_SENSORS.get().await.lock().await;
-            let PowerSensorArgs(_i2c_manager, devices, _alert_pins, _event_sender) = &mut *guard;
 
-            // Verify each device and configure it (runs once at startup)
-            // Collect indices to remove first to avoid borrow issues
-            let mut to_remove: heapless::Vec<usize, { consts::MAX_MONITORS }> =
-                heapless::Vec::new();
-            for idx in 0..devices.len() {
-                match devices[idx].chip.die_id().await {
-                    Ok(_id) => {
-                        defmt::println!("Found dvc {:x}", _id);
-                        // Do an initial read to check comms
-                        let (bus, shunt) = (
-                            devices[idx].chip.bus_voltage_raw().await,
-                            devices[idx].chip.shunt_voltage_raw().await,
-                        );
-                        match (bus, shunt) {
-                            (Ok(_), Ok(_)) => {}
-                            _ => {
-                                defmt::println!("I2CRead error");
-                                let _ = to_remove.push(idx);
-                                continue;
-                            }
-                        }
-
-                        // Configure conversions and alert.
-                        let mut mon_cfg = devices[idx].chip.configuration().await.unwrap().unwrap();
-                        mon_cfg.mode = ina226::MODE::ShuntBusVoltageContinuous;
-                        mon_cfg.avg = ina226::AVG::_1024;
-                        mon_cfg.vbusct = ina226::VBUSCT::_140us;
-                        mon_cfg.vshct = ina226::VSHCT::_588us;
-                        devices[idx].chip.set_configuration(&mon_cfg).await.unwrap();
-
-                        devices[idx]
-                            .chip
-                            .set_mask_enable(ina226::MaskEnableFlags::CNVR)
-                            .await
-                            .unwrap();
-                    }
-                    Err(_e) => {
-                        defmt::println!("No dvc");
-                        let _ = to_remove.push(idx);
-                    }
-                }
-            }
-
-            // Remove invalid devices (in reverse order to preserve indices)
-            let mut count = to_remove.len();
-            while count > 0 {
-                count -= 1;
-                devices.remove(to_remove[count]);
-            }
-
-            defmt::println!("Power sensors: {} devices found", devices.len());
-
-            // Now enter the alert-driven monitoring loop
+            // Discover and configure INA226 devices, then enter the alert-driven monitoring loop
+            crate::sensors::init_power_sensors(&mut *guard).await;
             crate::sensors::run_power_sensors(&mut *guard).await;
         }
     }

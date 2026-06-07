@@ -4,8 +4,10 @@
 //! all gated behind the `power_sensors` feature flag.
 
 use crate::application::MainEvent;
+use crate::consts::MAX_MONITORS;
 use crate::PowerSensorArgs;
 use embassy_futures::select::{select4, Either4};
+use heapless::Vec;
 
 /// Read a single INA226 monitor and send the observation via the event sender.
 /// Called when an alert pin goes low. Must read mask_enable to clear the alert flag.
@@ -47,6 +49,62 @@ pub async fn read_monitor(
             defmt::println!("FAIL bus:");
         }
     }
+}
+
+/// Discover and configure INA226 devices on startup. Runs once before entering the monitoring loop.
+pub async fn init_power_sensors(args: &mut PowerSensorArgs) {
+    let PowerSensorArgs(_i2c_manager, devices, _alert_pins, _event_sender) = args;
+
+    // Verify each device and configure it (runs once at startup)
+    // Collect indices to remove first to avoid borrow issues
+    let mut to_remove: Vec<usize, { MAX_MONITORS }> = Vec::new();
+    for idx in 0..devices.len() {
+        match devices[idx].chip.die_id().await {
+            Ok(_id) => {
+                defmt::println!("Found dvc {:x}", _id);
+                // Do an initial read to check comms
+                let (bus, shunt) = (
+                    devices[idx].chip.bus_voltage_raw().await,
+                    devices[idx].chip.shunt_voltage_raw().await,
+                );
+                match (bus, shunt) {
+                    (Ok(_), Ok(_)) => {}
+                    _ => {
+                        defmt::println!("I2CRead error");
+                        let _ = to_remove.push(idx);
+                        continue;
+                    }
+                }
+
+                // Configure conversions and alert.
+                let mut mon_cfg = devices[idx].chip.configuration().await.unwrap().unwrap();
+                mon_cfg.mode = ina226::MODE::ShuntBusVoltageContinuous;
+                mon_cfg.avg = ina226::AVG::_1024;
+                mon_cfg.vbusct = ina226::VBUSCT::_140us;
+                mon_cfg.vshct = ina226::VSHCT::_588us;
+                devices[idx].chip.set_configuration(&mon_cfg).await.unwrap();
+
+                devices[idx]
+                    .chip
+                    .set_mask_enable(ina226::MaskEnableFlags::CNVR)
+                    .await
+                    .unwrap();
+            }
+            Err(_e) => {
+                defmt::println!("No dvc");
+                let _ = to_remove.push(idx);
+            }
+        }
+    }
+
+    // Remove invalid devices (in reverse order to preserve indices)
+    let mut count = to_remove.len();
+    while count > 0 {
+        count -= 1;
+        devices.remove(to_remove[count]);
+    }
+
+    defmt::println!("Power sensors: {} devices found", devices.len());
 }
 
 /// Main power sensor loop: wait for any of 4 alert pins to go low, then read the corresponding monitor.
