@@ -476,39 +476,8 @@ mod app {
             }
         }
 
-        {
-            let mut guard = APP.get().await.lock().await;
-            match guard.init().await {
-                Err(err) => {
-                    let mut error_guard = MAIN_ERROR_SENDER.get().await.lock().await;
-                    error_guard.send(&err);
-                }
-                _ => {}
-            }
-        }
-
-        use embassy_futures::select::{select, Either};
-
-        loop {
-            let ret = select(events.receive(), async {
-                let mut guard = APP.get().await.lock().await;
-                if let Err(e) = guard.run().await {
-                    {
-                        let mut error_guard = MAIN_ERROR_SENDER.get().await.lock().await;
-                        error_guard.send(&e);
-                    }
-                }
-            })
-            .await;
-
-            match ret {
-                Either::First(event) => {
-                    let mut guard = APP.get().await.lock().await;
-                    guard.on_event(&event).await;
-                }
-                Either::Second(()) => {}
-            }
-        }
+        // App init + event loop - moved to application.rs for cleaner separation
+        APP.get().await.lock().await.run_loop(events).await;
     }
 
     #[allow(unused_mut, unused_variables)]
