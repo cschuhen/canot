@@ -31,8 +31,6 @@ pub mod types;
 #[cfg(feature = "terminal")]
 pub mod ui;
 
-#[cfg(feature = "power_sensors")]
-use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
@@ -256,57 +254,6 @@ mod app {
         };
         leds[1].set_high();
 
-        #[cfg(feature = "power_sensors")]
-        let mut addresses = {
-            type Addresses = heapless::Vec<u8, { consts::MAX_MONITORS }>;
-            Addresses::new()
-        };
-
-        // Setup I2C Bus manager (async I2c, blocking methods work during init)
-        #[cfg(feature = "power_sensors")]
-        static I2C_BUS: StaticCell<Mutex<CriticalSectionRawMutex, bsp::SensorI2c>> =
-            StaticCell::new();
-        #[cfg(feature = "power_sensors")]
-        let i2c_manager = {
-            // Scan for I2C addresses using blocking methods (works on async I2c too).
-            for addr in bsp::consts::INA226_ADDRS {
-                let mut dummy = [0u8; 0];
-                let dummy2 = [0u8; 0];
-                match sensors_i2c.blocking_write_read(addr, &dummy2, &mut dummy) {
-                    Ok(()) => {
-                        //defmt::println!("I2C addr={}", addr);
-                        addresses.push(addr).unwrap();
-                    }
-                    Err(_e) => {}
-                }
-            }
-            I2C_BUS.init(Mutex::new(sensors_i2c))
-        };
-        //#[cfg(not(feature = "power_sensors"))]
-        //pub type I2cDeviceIf = I2cDevice<'static, NoopRawMutex, bsp::SensorI2c>;
-        //use bme280::i2c::BME280;
-        //let bme = BME280::new_primary(
-        //    I2cDeviceIf::new(i2c_manager),
-        //    crate::application::DelayForBme280 {},
-        //);
-
-        // Setup I2C devices (create wrappers only, no I2C traffic yet - RTIC init is sync)
-        #[cfg(feature = "power_sensors")]
-        let i2c_devices = {
-            let mut i2c_devices = MonitorInterfaces::new();
-            for addr in addresses {
-                if i2c_devices
-                    .push(MonitorInterface {
-                        chip: INA226::new(I2cDevice::new(i2c_manager), addr),
-                    })
-                    .is_err()
-                {
-                    error_sender.report(FILE_CODE, crate::ErrorCode::NoDevice as u8, line!());
-                }
-            }
-            i2c_devices
-        };
-
         #[cfg(feature = "terminal")]
         let (display, display_reset_pin) = {
             let st = embassy_time::Delay;
@@ -368,10 +315,18 @@ mod app {
 
         //cx.core.SCB.set_sleepdeep();
 
+        // Initialize power sensors as global static (moved out of RTIC Local)
+        #[cfg(feature = "power_sensors")]
+        let power_sensor_args = crate::sensors::init_power_sensor_args(
+            sensors_i2c,
+            mon_alert_pins,
+            main_event_sender.clone(),
+        );
+
         let args = MainArgs {
             leds,
             #[cfg(feature = "power_sensors")]
-            ndevices: i2c_devices.len(),
+            ndevices: power_sensor_args.1.len(),
             nvs,
         };
 
@@ -389,13 +344,7 @@ mod app {
         // Initialize power sensors as global static (moved out of RTIC Local)
         #[cfg(feature = "power_sensors")]
         {
-            let _power_sensors = PowerSensorArgs(
-                i2c_manager,
-                i2c_devices,
-                mon_alert_pins,
-                main_event_sender.clone(),
-            );
-            POWER_SENSORS.get_or_init(|| Mutex::new(_power_sensors));
+            POWER_SENSORS.get_or_init(|| Mutex::new(power_sensor_args));
         }
 
         if let Err(_) = main_task::spawn(args, main_event_receiver) {

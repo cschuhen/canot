@@ -1,22 +1,78 @@
 //! Power sensor monitoring for INA226 devices.
 //!
-//! Contains the alert-driven read loop and per-monitor reading logic,
-//! all gated behind the `power_sensors` feature flag.
+//! Contains device initialization from BSP resources, the alert-driven read loop,
+//! per-monitor reading logic, all gated behind the `power_sensors` feature flag.
 
 use crate::application::MainEvent;
 use crate::consts::MAX_MONITORS;
 use crate::PowerSensorArgs;
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_futures::select::{select4, Either4};
+use embassy_stm32::exti::ExtiInput;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Sender;
+use embassy_sync::mutex::Mutex;
 use heapless::Vec;
+use static_cell::StaticCell;
+
+/// Build PowerSensorArgs from BSP resources.
+///
+/// Scans for INA226 devices on the I2C bus, creates wrapper structs,
+/// and returns a fully constructed `PowerSensorArgs` ready for init_power_sensors + run_power_sensors.
+pub fn init_power_sensor_args(
+    mut sensors_i2c: crate::bsp::SensorI2c,
+    mon_alert_pins: [ExtiInput<'static>; 4],
+    main_event_sender: Sender<
+        'static,
+        CriticalSectionRawMutex,
+        MainEvent,
+        { crate::MAIN_EVENT_CAPACITY },
+    >,
+) -> PowerSensorArgs {
+    type Addresses = Vec<u8, { MAX_MONITORS }>;
+
+    // Scan for I2C addresses using blocking methods (works on async I2c too).
+    let mut addresses = Addresses::new();
+    for addr in crate::bsp::consts::INA226_ADDRS {
+        let mut dummy = [0u8; 0];
+        let dummy2 = [0u8; 0];
+        match sensors_i2c.blocking_write_read(addr, &dummy2, &mut dummy) {
+            Ok(()) => {
+                addresses.push(addr).unwrap();
+            }
+            Err(_e) => {}
+        }
+    }
+
+    // Setup I2C Bus manager (async I2c, blocking methods work during init)
+    static I2C_BUS: StaticCell<Mutex<CriticalSectionRawMutex, crate::bsp::SensorI2c>> =
+        StaticCell::new();
+    let i2c_manager = I2C_BUS.init(Mutex::new(sensors_i2c));
+
+    // Setup I2C devices (create wrappers only, no I2C traffic yet - RTIC init is sync)
+    let mut i2c_devices = Vec::new();
+    for addr in addresses {
+        if i2c_devices
+            .push(crate::MonitorInterface {
+                chip: ina226::INA226::new(I2cDevice::new(i2c_manager), addr),
+            })
+            .is_err()
+        {
+            defmt::println!("Max monitors reached");
+        }
+    }
+
+    PowerSensorArgs(i2c_manager, i2c_devices, mon_alert_pins, main_event_sender)
+}
 
 /// Read a single INA226 monitor and send the observation via the event sender.
 /// Called when an alert pin goes low. Must read mask_enable to clear the alert flag.
 pub async fn read_monitor(
     chip: &mut crate::MonitorChip,
     index: u8,
-    event_sender: &mut crate::Sender<
+    event_sender: &mut Sender<
         'static,
-        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+        CriticalSectionRawMutex,
         MainEvent,
         { crate::MAIN_EVENT_CAPACITY },
     >,
@@ -108,7 +164,7 @@ pub async fn init_power_sensors(args: &mut PowerSensorArgs) {
 }
 
 /// Main power sensor loop: wait for any of 4 alert pins to go low, then read the corresponding monitor.
-pub async fn run_power_sensors(args: &mut crate::PowerSensorArgs) {
+pub async fn run_power_sensors(args: &mut PowerSensorArgs) {
     let PowerSensorArgs(_, devices, alert_pins, event_sender) = args;
     let [m0, m1, m2, m3] = alert_pins;
 
