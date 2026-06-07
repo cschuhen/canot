@@ -37,7 +37,6 @@ pub mod types;
 #[cfg(feature = "terminal")]
 pub mod ui;
 
-use embassy_stm32::can;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 #[cfg(any(feature = "power_sensors", feature = "terminal"))]
@@ -56,8 +55,6 @@ pub type MonitorChip = INA226<bsp::SensorDevice>;
 const FILE_CODE: u8 = 0x01;
 
 pub const MAIN_EVENT_CAPACITY: usize = 9;
-pub const CAN_TX_BUF_SIZE: usize = 8;
-pub const CAN_RX_BUF_SIZE: usize = 20;
 
 type Error = crate::error::Error;
 
@@ -120,12 +117,6 @@ static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = On
 // Using OnceLock for async access pattern consistency with other globals
 static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<
     Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
-> = embassy_sync::once_lock::OnceLock::new();
-
-// Global static for CAN interface (moved out of RTIC Local resources)
-// Using OnceLock since BufferedCan is Clone+Send and used by multiple tasks
-static CAN_IFACE: embassy_sync::once_lock::OnceLock<
-    can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
 > = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for main error sender (moved out of RTIC Local resources)

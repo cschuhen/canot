@@ -5,11 +5,21 @@
 //! `main.rs` to keep the RTIC app definition lean.
 
 use embassy_stm32::can;
-use embassy_sync::mutex::Mutex;
+use embassy_sync::{mutex::Mutex, once_lock::OnceLock};
 use static_cell::StaticCell;
 
 use crate::bsp::BufferedCanErrorSender;
-use crate::{CAN_IFACE, CAN_RX_BUF_SIZE, CAN_TX_BUF_SIZE, FILE_CODE, MAIN_ERROR_SENDER};
+use crate::{FILE_CODE, MAIN_ERROR_SENDER};
+
+/// CAN transmit buffer size
+pub const CAN_TX_BUF_SIZE: usize = 8;
+
+/// CAN receive buffer size
+pub const CAN_RX_BUF_SIZE: usize = 20;
+
+/// Global static for the buffered CAN interface
+static CAN_IFACE: OnceLock<can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>> =
+    OnceLock::new();
 
 /// Initialize the CAN interface.
 ///
