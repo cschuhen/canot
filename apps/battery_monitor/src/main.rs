@@ -83,7 +83,7 @@ struct MainArgs {
     nvs: nvstore::NvStore,
 }
 
-#[cfg(feature = "terminal")]
+#[allow(dead_code)]
 pub struct EncoderArgs(
     crate::bsp::InputPins,
     Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
@@ -134,13 +134,6 @@ static MAIN_ERROR_SENDER: embassy_sync::once_lock::OnceLock<
 // Using OnceLock with Mutex since MonitorApp needs interior mutability
 static APP: embassy_sync::once_lock::OnceLock<
     Mutex<CriticalSectionRawMutex, crate::application::MonitorApp>,
-> = embassy_sync::once_lock::OnceLock::new();
-
-// Global static for encoder args (moved out of RTIC Local resources)
-// Using OnceLock with Mutex since EncoderArgs needs interior mutability
-#[cfg(feature = "terminal")]
-static ENCODER_ARGS: embassy_sync::once_lock::OnceLock<
-    Mutex<CriticalSectionRawMutex, EncoderArgs>,
 > = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for power sensors args (moved out of RTIC Local resources)
@@ -332,17 +325,6 @@ mod app {
             nvs,
         };
 
-        // Initialize encoder args as global static (moved out of RTIC Local)
-        #[cfg(feature = "terminal")]
-        {
-            let _encoder_args = EncoderArgs(
-                encoder_pins,
-                main_event_sender.clone(),
-                error_sender.clone(),
-            );
-            ENCODER_ARGS.get_or_init(|| Mutex::new(_encoder_args));
-        }
-
         // Initialize power sensors as global static (moved out of RTIC Local)
         #[cfg(feature = "power_sensors")]
         {
@@ -354,9 +336,13 @@ mod app {
         }
 
         #[cfg(feature = "terminal")]
-        match encoder_task::spawn() {
-            Ok(_) => {}
-            Err(_) => {
+        {
+            let encoder_args = EncoderArgs(
+                encoder_pins,
+                main_event_sender.clone(),
+                error_sender.clone(),
+            );
+            if let Err(_) = encoder_task::spawn(encoder_args) {
                 error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
             }
         }
@@ -658,17 +644,10 @@ mod app {
         }
     }
 
+    #[allow(unused_mut, unused_variables)]
     #[task(priority = 1)]
-    async fn encoder_task(cx: encoder_task::Context) {
-        //let EncoderArgs(mut pins, mut sender, mut error_sender) = cx.local.encoder_args;
-        //run_encoder(&mut pins, &mut sender, &mut error_sender).await;
-        //let _dr = &cx.shared.dummy;
+    async fn encoder_task(_cx: encoder_task::Context, mut args: EncoderArgs) {
         #[cfg(feature = "terminal")]
-        {
-            let mut guard = ENCODER_ARGS.get().await.lock().await;
-            crate::encoder::run_encoder(&mut *guard).await;
-        }
-        // Avoid unused variable warning
-        let _cx = &cx;
+        crate::encoder::run_encoder(&mut args).await;
     }
 }
