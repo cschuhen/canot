@@ -25,6 +25,8 @@ pub mod consts;
 pub mod encoder;
 pub mod error;
 pub mod graphical_elements;
+#[cfg(feature = "power_sensors")]
+pub mod ignition_input;
 pub mod nvstore;
 pub mod powercalc;
 #[cfg(feature = "power_sensors")]
@@ -441,50 +443,11 @@ mod app {
         }
     }
 
+    #[allow(unused_mut, unused_variables)]
     #[task(priority = 1)]
-    #[allow(unused_mut)]
     async fn ignition_task(_cx: ignition_task::Context, mut cansleep: Output<'static>) {
         #[cfg(feature = "power_sensors")]
-        {
-            let mut enabled = true;
-            defmt::println!("Ignition task started");
-            let mut delay = Delay {};
-            loop {
-                // Wait for any edge on the ignition pin (manual debounce)
-                let ignition_pin_ref = IGNITION_PIN.get().await;
-                match ignition_pin_ref.lock().await.wait_for_any_edge().await {
-                    () => {
-                        // Debounce: wait a short time and re-check
-                        delay.delay_ms(10).await;
-                        let ignition = ignition_pin_ref.lock().await.is_high();
-
-                        if ignition != enabled {
-                            defmt::println!("Ignition state changed: {}", ignition);
-                            enabled = ignition;
-
-                            if enabled {
-                                cansleep.set_low();
-                                delay.delay_ms(100).await;
-                            } else {
-                                cansleep.set_high();
-                            }
-
-                            *IGNITION_STATE.lock().await = enabled;
-
-                            CAN_SUSPENDED_SENDER
-                                .get()
-                                .await
-                                .send(MainEvent::CanEnabled(enabled))
-                                .await;
-                        }
-                    }
-                }
-            }
-        }
-        #[cfg(not(feature = "power_sensors"))]
-        {
-            let _cansleep = &mut cansleep;
-        }
+        crate::ignition_input::run_ignition(&mut cansleep).await;
     }
 
     async fn init_storage(
