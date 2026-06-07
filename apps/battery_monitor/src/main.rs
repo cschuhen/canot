@@ -20,6 +20,7 @@ use rtic::app;
 
 pub mod application;
 mod bsp;
+pub mod can_init;
 pub mod consts;
 #[cfg(feature = "terminal")]
 pub mod encoder;
@@ -215,31 +216,7 @@ mod app {
         //cansleep.set_low();
 
         // Setup CAN
-        can_iface.properties().set_extended_filter(
-            can::filter::ExtendedFilterSlot::_0,
-            can::filter::ExtendedFilter::accept_all_into_fifo1(),
-        );
-
-        // 250k bps
-        can_iface.set_bitrate(250_000);
-
-        let can_iface = can_iface.start(can::OperatingMode::NormalOperationMode);
-        static TX_BUF: StaticCell<can::TxBuf<CAN_TX_BUF_SIZE>> = StaticCell::new();
-        static RX_BUF: StaticCell<can::RxBuf<CAN_RX_BUF_SIZE>> = StaticCell::new();
-        let can_iface = can_iface.buffered(
-            TX_BUF.init(can::TxBuf::<CAN_TX_BUF_SIZE>::new()),
-            RX_BUF.init(can::RxBuf::<CAN_RX_BUF_SIZE>::new()),
-        );
-        // Get reader/writer before moving can_iface into static
-        let can_reader = can_iface.reader();
-        let can_writer = can_iface.writer();
-        let mut error_sender = crate::bsp::BufferedCanErrorSender::new(can_writer.clone());
-        // Initialize CAN interface as global static (moved out of RTIC Local)
-        CAN_IFACE.get_or_init(|| can_iface);
-
-        error_sender.report(FILE_CODE, ErrorCode::CheckPoint as u8, line!());
-        // Initialize main error sender as global static (moved out of RTIC Local)
-        MAIN_ERROR_SENDER.get_or_init(|| Mutex::new(error_sender.clone()));
+        let (can_receiver, can_sender, mut error_sender) = crate::can_init::init_can(can_iface);
 
         let _eeprom = {
             use eeprom24x::{Eeprom24x, SlaveAddr};
@@ -284,8 +261,8 @@ mod app {
 
         let app = crate::application::MonitorApp::new(
             embassy_time::Instant::now(),
-            can_reader,
-            can_writer,
+            can_receiver,
+            can_sender,
             device_id,
             #[cfg(feature = "terminal")]
             display,
@@ -362,29 +339,7 @@ mod app {
             // Return Shared resources
             Shared {},
             // Return Local resources
-            Local {
-                //can_iface,
-                //cansleep moved to ignition_task via spawn argument above
-                //rtc,
-                //app,
-                //#[cfg(feature = "power_sensors")]
-                //power_sensors: PowerSensorArgs(
-                //    i2c_manager,
-                //    i2c_devices,
-                //    mon_alert_pins,
-                //    main_event_sender.clone(),
-                //),
-                //i2c_devices,
-                //mon_alert_pins,
-                //mon_obs_event_sender: main_event_sender.clone(),
-                //#[cfg(feature = "terminal")]
-                //encoder_args: EncoderArgs(
-                //    encoder_pins,
-                //    main_event_sender.clone(),
-                //    error_sender.clone(),
-                //),
-
-            },
+            Local {},
         )
     }
 
