@@ -31,6 +31,7 @@ pub mod nvstore;
 pub mod powercalc;
 #[cfg(feature = "power_sensors")]
 pub mod sensors;
+pub mod storage;
 pub mod types;
 #[cfg(feature = "terminal")]
 pub mod ui;
@@ -454,37 +455,7 @@ mod app {
         shared_nvs: &nvstore::SharedNvStore,
         leds: &mut crate::bsp::Leds,
     ) -> Result<Option<i64>, j1939::error::Error> {
-        leds[0].set_low();
-        let mut unlocked = shared_nvs.nv.lock().await;
-        let nvs = unlocked
-            .as_mut()
-            .ok_or(error::mkerr(FILE_CODE, ErrorCode::NoDevice, line!()))?;
-
-        nvs.init().await?;
-
-        leds[1].set_low();
-
-        //nvs.load_monitor_settings().await?;
-
-        leds[2].set_high();
-
-        #[cfg(feature = "power_sensors")]
-        let ret = {
-            let mut header = nvstore::power_sensors::Header::new();
-            match nvs
-                .load_last_monitor_observation(&APPDATA, -1, &mut header)
-                .await?
-            {
-                true => Some(header.time),
-                false => None,
-            }
-        };
-        #[cfg(not(feature = "power_sensors"))]
-        let ret: Option<i64> = None;
-
-        leds[3].set_high();
-
-        Ok(ret)
+        crate::storage::run_init_storage(shared_nvs, leds).await
     }
 
     #[task(priority = 2)]
