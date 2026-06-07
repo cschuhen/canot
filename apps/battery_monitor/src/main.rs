@@ -25,29 +25,29 @@ pub mod error;
 pub mod graphical_elements;
 pub mod nvstore;
 pub mod powercalc;
+#[cfg(feature = "power_sensors")]
+pub mod sensors;
 pub mod types;
 #[cfg(feature = "terminal")]
 pub mod ui;
 
-
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 #[cfg(feature = "power_sensors")]
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::can;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
-use static_cell::StaticCell;
 #[cfg(any(feature = "power_sensors", feature = "terminal"))]
 use embassy_sync::channel::Sender;
 use embassy_sync::mutex::Mutex;
+use static_cell::StaticCell;
 
 #[cfg(feature = "power_sensors")]
 use embassy_sync::once_lock::OnceLock;
 
-
 #[cfg(feature = "power_sensors")]
 use ina226::INA226;
 #[cfg(feature = "power_sensors")]
-type MonitorChip = INA226<bsp::SensorDevice>;
+pub type MonitorChip = INA226<bsp::SensorDevice>;
 
 const FILE_CODE: u8 = 0x01;
 
@@ -63,7 +63,7 @@ pub struct MonitorInterface {
 }
 
 #[cfg(feature = "power_sensors")]
-type MonitorInterfaces = heapless::Vec<MonitorInterface, { consts::MAX_MONITORS }>;
+pub type MonitorInterfaces = heapless::Vec<MonitorInterface, { consts::MAX_MONITORS }>;
 
 pub enum I2cEvent {
     Alert(u8),
@@ -91,7 +91,7 @@ struct EncoderArgs(
 );
 
 #[cfg(feature = "power_sensors")]
-struct PowerSensorArgs(
+pub struct PowerSensorArgs(
     &'static Mutex<CriticalSectionRawMutex, bsp::SensorI2c>,
     MonitorInterfaces,
     bsp::MonitorAlertPins,
@@ -101,7 +101,8 @@ struct PowerSensorArgs(
 static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::new();
 
 // Global static for data store (moved out of RTIC Shared resources)
-static APPDATA: application::DataStore = embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
+static APPDATA: application::DataStore =
+    embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
 
 // Global static for ignition state (moved out of RTIC Shared resources)
 static IGNITION_STATE: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(true);
@@ -113,31 +114,43 @@ static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = On
 
 // Global static for can suspended event sender (moved out of RTIC Local resources)
 // Using OnceLock for async access pattern consistency with other globals
-static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> = embassy_sync::once_lock::OnceLock::new();
+static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<
+    Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
+> = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for CAN interface (moved out of RTIC Local resources)
 // Using OnceLock since BufferedCan is Clone+Send and used by multiple tasks
-static CAN_IFACE: embassy_sync::once_lock::OnceLock<can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>> = embassy_sync::once_lock::OnceLock::new();
+static CAN_IFACE: embassy_sync::once_lock::OnceLock<
+    can::BufferedCan<'static, CAN_TX_BUF_SIZE, CAN_RX_BUF_SIZE>,
+> = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for main error sender (moved out of RTIC Local resources)
 // Using OnceLock with Mutex since BufferedCanErrorSender needs interior mutability
-static MAIN_ERROR_SENDER: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, crate::bsp::BufferedCanErrorSender>> = embassy_sync::once_lock::OnceLock::new();
+static MAIN_ERROR_SENDER: embassy_sync::once_lock::OnceLock<
+    Mutex<CriticalSectionRawMutex, crate::bsp::BufferedCanErrorSender>,
+> = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for application (moved out of RTIC Local resources)
 // Using OnceLock with Mutex since MonitorApp needs interior mutability
-static APP: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, crate::application::MonitorApp>> = embassy_sync::once_lock::OnceLock::new();
+static APP: embassy_sync::once_lock::OnceLock<
+    Mutex<CriticalSectionRawMutex, crate::application::MonitorApp>,
+> = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for encoder args (moved out of RTIC Local resources)
 // Using OnceLock with Mutex since EncoderArgs needs interior mutability
 #[cfg(feature = "terminal")]
-static ENCODER_ARGS: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, EncoderArgs>> = embassy_sync::once_lock::OnceLock::new();
+static ENCODER_ARGS: embassy_sync::once_lock::OnceLock<
+    Mutex<CriticalSectionRawMutex, EncoderArgs>,
+> = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for power sensors args (moved out of RTIC Local resources)
 // Using OnceLock with Mutex since PowerSensorArgs needs interior mutability
 // Switched from NoopRawMutex to CriticalSectionRawMutex for the I2C bus reference
 // so that PowerSensorArgs implements Send+Sync and can be used in global statics
 #[cfg(feature = "power_sensors")]
-static POWER_SENSORS: embassy_sync::once_lock::OnceLock<Mutex<CriticalSectionRawMutex, PowerSensorArgs>> = embassy_sync::once_lock::OnceLock::new();
+static POWER_SENSORS: embassy_sync::once_lock::OnceLock<
+    Mutex<CriticalSectionRawMutex, PowerSensorArgs>,
+> = embassy_sync::once_lock::OnceLock::new();
 
 // CAN sleep pin - kept in Local due to OutputPin not implementing Sync
 // (only accessed by ignition_task, no concurrency concerns)
@@ -157,8 +170,7 @@ mod app {
     use super::*;
 
     #[shared]
-    struct Shared {
-    }
+    struct Shared {}
 
     #[local]
     struct Local {
@@ -198,9 +210,9 @@ mod app {
 
         // Initialize ignition pin as global static (moved out of RTIC Local)
         #[cfg(feature = "power_sensors")]
-        { let _ignition_pin_ref = IGNITION_PIN.get_or_init(|| Mutex::new(ignition_pin)); }
-
-
+        {
+            let _ignition_pin_ref = IGNITION_PIN.get_or_init(|| Mutex::new(ignition_pin));
+        }
 
         leds[0].set_high();
         leds[1].set_low();
@@ -339,8 +351,9 @@ mod app {
         // Initialize app as global static (moved out of RTIC Local)
         APP.get_or_init(|| Mutex::new(app));
 
-        static MAIN_CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>> =
-            StaticCell::new();
+        static MAIN_CHANNEL: StaticCell<
+            Channel<CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
+        > = StaticCell::new();
         let main_channel = MAIN_CHANNEL.init(Channel::new());
         let main_event_sender = main_channel.sender();
         // Initialize can suspended event sender as global static (moved out of RTIC Local)
@@ -407,8 +420,7 @@ mod app {
 
         (
             // Return Shared resources
-            Shared {
-            },
+            Shared {},
             // Return Local resources
             Local {
                 //can_iface,
@@ -450,10 +462,7 @@ mod app {
     }
 
     #[task(priority = 1)]
-    async fn start_flash(
-        _cx: start_flash::Context,
-        shared_nvs: &'static nvstore::SharedNvStore,
-    ) {
+    async fn start_flash(_cx: start_flash::Context, shared_nvs: &'static nvstore::SharedNvStore) {
         #[cfg(feature = "power_sensors")]
         loop {
             let mut header = nvstore::power_sensors::Header::new();
@@ -478,7 +487,7 @@ mod app {
         }
     }
 
-    #[task(priority=2)]
+    #[task(priority = 2)]
     async fn blink(_cx: blink::Context, led: &mut crate::bsp::OutputPin) {
         let mut delay = Delay {};
         loop {
@@ -495,7 +504,7 @@ mod app {
         }
     }
 
-    #[task(priority=1)]
+    #[task(priority = 1)]
     #[allow(unused_mut)]
     async fn ignition_task(_cx: ignition_task::Context, mut cansleep: Output<'static>) {
         #[cfg(feature = "power_sensors")]
@@ -506,31 +515,35 @@ mod app {
             loop {
                 // Wait for any edge on the ignition pin (manual debounce)
                 let ignition_pin_ref = IGNITION_PIN.get().await;
-            match ignition_pin_ref.lock().await.wait_for_any_edge().await {
-                () => {
-                    // Debounce: wait a short time and re-check
-                    delay.delay_ms(10).await;
-                    let ignition = ignition_pin_ref.lock().await.is_high();
+                match ignition_pin_ref.lock().await.wait_for_any_edge().await {
+                    () => {
+                        // Debounce: wait a short time and re-check
+                        delay.delay_ms(10).await;
+                        let ignition = ignition_pin_ref.lock().await.is_high();
 
-                    if ignition != enabled {
-                        defmt::println!("Ignition state changed: {}", ignition);
-                        enabled = ignition;
+                        if ignition != enabled {
+                            defmt::println!("Ignition state changed: {}", ignition);
+                            enabled = ignition;
 
-                        if enabled {
-                            cansleep.set_low();
-                            delay.delay_ms(100).await;
-                        } else {
-                            cansleep.set_high();
+                            if enabled {
+                                cansleep.set_low();
+                                delay.delay_ms(100).await;
+                            } else {
+                                cansleep.set_high();
+                            }
+
+                            *IGNITION_STATE.lock().await = enabled;
+
+                            CAN_SUSPENDED_SENDER
+                                .get()
+                                .await
+                                .send(MainEvent::CanEnabled(enabled))
+                                .await;
                         }
-
-                        *IGNITION_STATE.lock().await = enabled;
-
-                        CAN_SUSPENDED_SENDER.get().await.send(MainEvent::CanEnabled(enabled)).await;
                     }
                 }
             }
         }
-    }
         #[cfg(not(feature = "power_sensors"))]
         {
             let _cansleep = &mut cansleep;
@@ -574,13 +587,12 @@ mod app {
         Ok(ret)
     }
 
-    #[task(priority=2)]
+    #[task(priority = 2)]
     async fn main_task(
         _cx: main_task::Context,
         mut args: MainArgs,
         events: Receiver<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
     ) {
-
         *(NVSTORE.nv.lock().await) = Some(args.nvs);
 
         #[cfg(feature = "power_sensors")]
@@ -594,7 +606,7 @@ mod app {
                 Err(e) => {
                     let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
                     guard.send(&e);
-                },
+                }
                 _ => {}
             }
         }
@@ -651,16 +663,12 @@ mod app {
             let mut guard = APP.get().await.lock().await;
             match guard.init().await {
                 Err(err) => {
-                    {
-                        let mut error_guard = MAIN_ERROR_SENDER.get().await.lock().await;
-                        error_guard.send(&err);
-                    }
+                    let mut error_guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                    error_guard.send(&err);
                 }
                 _ => {}
             }
         }
-
-
 
         use embassy_futures::select::{select, Either};
 
@@ -673,58 +681,21 @@ mod app {
                         error_guard.send(&e);
                     }
                 }
-            }).await;
+            })
+            .await;
 
             match ret {
                 Either::First(event) => {
-                    {
-                        let mut guard = APP.get().await.lock().await;
-                        guard.on_event(&event).await;
-                    }
+                    let mut guard = APP.get().await.lock().await;
+                    guard.on_event(&event).await;
                 }
                 Either::Second(()) => {}
             }
         }
     }
 
-    #[cfg(feature = "power_sensors")]
-    async fn read_monitor(
-        chip: &mut MonitorChip,
-        index: u8,
-        event_sender: &mut Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
-    ) {
-        // Must read this to clear alert.
-        let mon_mask = chip.mask_enable().await.unwrap();
-
-        if !mon_mask.contains(ina226::MaskEnableFlags::CVRF) {
-            return;
-        }
-
-        let bus = chip.bus_voltage_raw().await;
-        let shunt = chip.shunt_voltage_raw().await;
-        match (bus, shunt) {
-            (Ok(bus), Ok(shunt)) => match event_sender.try_send(MainEvent::MonitorObservation(
-                crate::powercalc::Observation::new(index, bus, shunt),
-            )) {
-                Ok(_) => {}
-                Err(_) => {
-                    //defmt::println!("Spawn Err ")
-                }
-            },
-            (Err(_bus), Err(_shunt)) => {
-                defmt::println!("FAIL bus: shunt:")
-            }
-            (Ok(_), Err(_shunt)) => {
-                defmt::println!("FAIL shunt:");
-            }
-            (Err(_bus), Ok(_)) => {
-                defmt::println!("FAIL bus:");
-            }
-        }
-    }
-
     #[allow(unused_mut, unused_variables)]
-    #[task(priority=3)]
+    #[task(priority = 3)]
     async fn i2c_task(mut cx: i2c_task::Context) {
         #[cfg(feature = "power_sensors")]
         {
@@ -733,7 +704,8 @@ mod app {
 
             // Verify each device and configure it (runs once at startup)
             // Collect indices to remove first to avoid borrow issues
-            let mut to_remove: heapless::Vec<usize, { consts::MAX_MONITORS }> = heapless::Vec::new();
+            let mut to_remove: heapless::Vec<usize, { consts::MAX_MONITORS }> =
+                heapless::Vec::new();
             for idx in 0..devices.len() {
                 match devices[idx].chip.die_id().await {
                     Ok(_id) => {
@@ -760,7 +732,8 @@ mod app {
                         mon_cfg.vshct = ina226::VSHCT::_588us;
                         devices[idx].chip.set_configuration(&mon_cfg).await.unwrap();
 
-                        devices[idx].chip
+                        devices[idx]
+                            .chip
                             .set_mask_enable(ina226::MaskEnableFlags::CNVR)
                             .await
                             .unwrap();
@@ -782,52 +755,11 @@ mod app {
             defmt::println!("Power sensors: {} devices found", devices.len());
 
             // Now enter the alert-driven monitoring loop
-            run_power_sensors(&mut *guard).await;
+            crate::sensors::run_power_sensors(&mut *guard).await;
         }
     }
 
-    #[cfg(feature = "power_sensors")]
-    async fn run_power_sensors(
-        //pins: &mut crate::bsp::InputPins,
-        //sender: &mut Sender<'static, MainEvent, MAIN_EVENT_CAPACITY>,
-        //error_sender: &mut crate::bsp::BufferedCanErrorSender,
-        args: &mut PowerSensorArgs,
-    ) {
-        //let mut delay = Delay {};
-        //delay.delay_ms(1000).await;
-
-        use embassy_futures::select::{select4, Either4};
-        let PowerSensorArgs(_i2c_manager, devices, alert_pins, event_sender) = args;
-        let [m0, m1, m2, m3] = alert_pins;
-
-        loop {
-            //let futures = cx.local.mon_alert_pins.map(|p| p.wait_for_low());
-            let index = match select4(
-                m0.wait_for_low(),
-                m1.wait_for_low(),
-                m2.wait_for_low(),
-                m3.wait_for_low(),
-            )
-            .await
-            {
-                Either4::First(_) => 0,
-                Either4::Second(_) => 1,
-                Either4::Third(_) => 2,
-                Either4::Fourth(_) => 3,
-            };
-            if index >= devices.len() {
-                defmt::println!("NoDvc {}/{}", index, devices.len());
-                continue;
-            }
-            //defmt::println!("GotAlert {}/{}", index, cx.local.i2c_devices.len());
-            //cx.local.mon0_alert_pin.wait_for_low().await;
-            read_monitor(&mut devices[index].chip, index as u8, event_sender).await;
-            //defmt::println!("DoneAlert {}/{}", index, cx.local.i2c_devices.len());
-        }
-    }
-    //#[cfg(feature = "terminal")]
-
-    #[task(priority=1)]
+    #[task(priority = 1)]
     async fn encoder_task(cx: encoder_task::Context) {
         //let EncoderArgs(mut pins, mut sender, mut error_sender) = cx.local.encoder_args;
         //run_encoder(&mut pins, &mut sender, &mut error_sender).await;
