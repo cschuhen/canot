@@ -45,9 +45,6 @@ use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 #[cfg(feature = "power_sensors")]
-use embassy_sync::once_lock::OnceLock;
-
-#[cfg(feature = "power_sensors")]
 use ina226::INA226;
 #[cfg(feature = "power_sensors")]
 pub type MonitorChip = INA226<bsp::SensorDevice>;
@@ -65,11 +62,6 @@ pub struct MonitorInterface {
 
 #[cfg(feature = "power_sensors")]
 pub type MonitorInterfaces = heapless::Vec<MonitorInterface, { consts::MAX_MONITORS }>;
-
-pub enum I2cEvent {
-    Alert(u8),
-    Timeout,
-}
 
 pub mod pac {
     // pub use cortex_m_rt::interrupt;
@@ -104,14 +96,6 @@ static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::n
 // Global static for data store (moved out of RTIC Shared resources)
 static APPDATA: application::DataStore =
     embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
-
-// Global static for ignition state (moved out of RTIC Shared resources)
-static IGNITION_STATE: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(true);
-
-// Global static for ignition pin (moved out of RTIC Local resources)
-// Using OnceLock with Mutex for safe shared access in preparation for embassy migration
-#[cfg(feature = "power_sensors")]
-static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = OnceLock::new();
 
 // Global static for can suspended event sender (moved out of RTIC Local resources)
 // Using OnceLock for async access pattern consistency with other globals
@@ -199,7 +183,8 @@ mod app {
         // Initialize ignition pin as global static (moved out of RTIC Local)
         #[cfg(feature = "power_sensors")]
         {
-            let _ignition_pin_ref = IGNITION_PIN.get_or_init(|| Mutex::new(ignition_pin));
+            let _ignition_pin_ref =
+                crate::ignition_input::IGNITION_PIN.get_or_init(|| Mutex::new(ignition_pin));
         }
 
         leds[0].set_high();
@@ -381,11 +366,18 @@ mod app {
             delay.delay_ms(5).await;
 
             led.set_low();
-            let ignition_state = IGNITION_STATE.lock().await;
-            if *ignition_state {
+            #[cfg(feature = "power_sensors")]
+            {
+                let ignition_state = crate::ignition_input::IGNITION_STATE.lock().await;
+                if *ignition_state {
+                    delay.delay_ms(1000).await;
+                } else {
+                    delay.delay_ms(60000).await;
+                }
+            }
+            #[cfg(not(feature = "power_sensors"))]
+            {
                 delay.delay_ms(1000).await;
-            } else {
-                delay.delay_ms(60000).await;
             }
         }
     }

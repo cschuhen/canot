@@ -4,10 +4,21 @@
 //! `main.rs` to keep the RTIC app definition lean.
 
 use crate::application::MainEvent;
+use crate::bsp;
+
+use embassy_stm32::gpio::Output;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
+use embassy_sync::once_lock::OnceLock;
 use embassy_time::Delay as TimeDelay;
 use embedded_hal_async::delay::DelayNs;
 
-use embassy_stm32::gpio::Output;
+/// Global static for ignition state.
+pub static IGNITION_STATE: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(true);
+
+/// Global static for ignition pin (OnceLock + Mutex for safe shared access).
+#[cfg(feature = "power_sensors")]
+pub static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> = OnceLock::new();
 
 /// Run the ignition monitoring loop.
 ///
@@ -17,7 +28,7 @@ use embassy_stm32::gpio::Output;
 /// - Sends a `MainEvent::CanEnabled` through the global suspended sender.
 pub async fn run_ignition(cansleep: &mut Output<'static>) {
     {
-        use crate::{CAN_SUSPENDED_SENDER, IGNITION_PIN, IGNITION_STATE};
+        use crate::CAN_SUSPENDED_SENDER;
 
         let mut enabled = true;
         defmt::println!("Ignition task started");
