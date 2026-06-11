@@ -1,3 +1,5 @@
+pub const MAIN_EVENT_CAPACITY: usize = 9;
+
 use crate::error::*;
 use embassy_stm32::can;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;

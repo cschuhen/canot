@@ -5,6 +5,7 @@
 
 use crate::application::MainEvent;
 use crate::bsp;
+use crate::MAIN_EVENT_CAPACITY;
 
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -15,6 +16,11 @@ use embedded_hal_async::delay::DelayNs;
 
 /// Global static for ignition state.
 pub static IGNITION_STATE: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(true);
+
+/// Global static for can suspended event sender.
+pub static CAN_SUSPENDED_SENDER: OnceLock<
+    embassy_sync::channel::Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
+> = OnceLock::new();
 
 /// Global static for ignition pin (OnceLock + Mutex for safe shared access).
 #[cfg(feature = "power_sensors")]
@@ -28,8 +34,6 @@ pub static IGNITION_PIN: OnceLock<Mutex<CriticalSectionRawMutex, bsp::ExtiPin>> 
 /// - Sends a `MainEvent::CanEnabled` through the global suspended sender.
 pub async fn run_ignition(cansleep: &mut Output<'static>) {
     {
-        use crate::CAN_SUSPENDED_SENDER;
-
         let mut enabled = true;
         defmt::println!("Ignition task started");
         let mut delay = TimeDelay {};

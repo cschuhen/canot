@@ -4,9 +4,22 @@
 //! per-monitor reading logic, all gated behind the `power_sensors` feature flag.
 
 use crate::application::MainEvent;
+use crate::bsp;
 use crate::consts::MAX_MONITORS;
 use crate::PowerSensorArgs;
+
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+
+/// Type alias for the INA226 monitor chip.
+pub type MonitorChip = ina226::INA226<bsp::SensorDevice>;
+
+/// Wrapper struct holding a single INA226 monitor interface.
+pub struct MonitorInterface {
+    pub chip: MonitorChip,
+}
+
+/// Collection of all monitor interfaces.
+pub type MonitorInterfaces = heapless::Vec<MonitorInterface, { MAX_MONITORS }>;
 use embassy_futures::select::{select4, Either4};
 use embassy_stm32::exti::ExtiInput;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -53,7 +66,7 @@ pub fn init_power_sensor_args(
     let mut i2c_devices = Vec::new();
     for addr in addresses {
         if i2c_devices
-            .push(crate::MonitorInterface {
+            .push(MonitorInterface {
                 chip: ina226::INA226::new(I2cDevice::new(i2c_manager), addr),
             })
             .is_err()
@@ -68,7 +81,7 @@ pub fn init_power_sensor_args(
 /// Read a single INA226 monitor and send the observation via the event sender.
 /// Called when an alert pin goes low. Must read mask_enable to clear the alert flag.
 pub async fn read_monitor(
-    chip: &mut crate::MonitorChip,
+    chip: &mut MonitorChip,
     index: u8,
     event_sender: &mut Sender<
         'static,

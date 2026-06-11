@@ -5,11 +5,16 @@
 //! `main.rs` to keep the RTIC app definition lean.
 
 use embassy_stm32::can;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::{mutex::Mutex, once_lock::OnceLock};
 use static_cell::StaticCell;
 
 use crate::bsp::BufferedCanErrorSender;
-use crate::{FILE_CODE, MAIN_ERROR_SENDER};
+use crate::FILE_CODE;
+
+/// Global static for main error sender (moved out of RTIC Local resources).
+pub static MAIN_ERROR_SENDER: OnceLock<Mutex<CriticalSectionRawMutex, BufferedCanErrorSender>> =
+    OnceLock::new();
 
 /// CAN transmit buffer size
 pub const CAN_TX_BUF_SIZE: usize = 8;
@@ -69,7 +74,7 @@ pub fn init_can(
         line!(),
     );
     // Initialize main error sender as global static
-    MAIN_ERROR_SENDER.get_or_init(|| Mutex::new(error_sender.clone()));
+    crate::can_init::MAIN_ERROR_SENDER.get_or_init(|| Mutex::new(error_sender.clone()));
 
     (can_receiver, can_sender, error_sender)
 }

@@ -19,6 +19,8 @@ use crate::error::*;
 use rtic::app;
 
 pub mod application;
+pub use crate::application::MAIN_EVENT_CAPACITY;
+
 mod bsp;
 pub mod can_init;
 pub mod consts;
@@ -44,24 +46,9 @@ use embassy_sync::channel::Sender;
 use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
-#[cfg(feature = "power_sensors")]
-use ina226::INA226;
-#[cfg(feature = "power_sensors")]
-pub type MonitorChip = INA226<bsp::SensorDevice>;
-
 const FILE_CODE: u8 = 0x01;
 
-pub const MAIN_EVENT_CAPACITY: usize = 9;
-
 type Error = crate::error::Error;
-
-#[cfg(feature = "power_sensors")]
-pub struct MonitorInterface {
-    chip: MonitorChip,
-}
-
-#[cfg(feature = "power_sensors")]
-pub type MonitorInterfaces = heapless::Vec<MonitorInterface, { consts::MAX_MONITORS }>;
 
 pub mod pac {
     // pub use cortex_m_rt::interrupt;
@@ -86,7 +73,7 @@ pub struct EncoderArgs(
 #[cfg(feature = "power_sensors")]
 pub struct PowerSensorArgs(
     &'static Mutex<CriticalSectionRawMutex, bsp::SensorI2c>,
-    MonitorInterfaces,
+    sensors::MonitorInterfaces,
     bsp::MonitorAlertPins,
     Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
 );
@@ -96,18 +83,6 @@ static NVSTORE: crate::nvstore::SharedNvStore = crate::nvstore::SharedNvStore::n
 // Global static for data store (moved out of RTIC Shared resources)
 static APPDATA: application::DataStore =
     embassy_sync::mutex::Mutex::new(application::Data::new(&NVSTORE));
-
-// Global static for can suspended event sender (moved out of RTIC Local resources)
-// Using OnceLock for async access pattern consistency with other globals
-static CAN_SUSPENDED_SENDER: embassy_sync::once_lock::OnceLock<
-    Sender<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
-> = embassy_sync::once_lock::OnceLock::new();
-
-// Global static for main error sender (moved out of RTIC Local resources)
-// Using OnceLock with Mutex since BufferedCanErrorSender needs interior mutability
-static MAIN_ERROR_SENDER: embassy_sync::once_lock::OnceLock<
-    Mutex<CriticalSectionRawMutex, crate::bsp::BufferedCanErrorSender>,
-> = embassy_sync::once_lock::OnceLock::new();
 
 // Global static for application (moved out of RTIC Local resources)
 // Using OnceLock with Mutex since MonitorApp needs interior mutability
@@ -254,8 +229,11 @@ mod app {
         > = StaticCell::new();
         let main_channel = MAIN_CHANNEL.init(Channel::new());
         let main_event_sender = main_channel.sender();
-        // Initialize can suspended event sender as global static (moved out of RTIC Local)
-        CAN_SUSPENDED_SENDER.get_or_init(|| main_event_sender.clone());
+        #[cfg(feature = "power_sensors")]
+        {
+            // Initialize can suspended event sender as global static (moved out of RTIC Local)
+            crate::ignition_input::CAN_SUSPENDED_SENDER.get_or_init(|| main_event_sender.clone());
+        }
         let main_event_receiver = main_channel.receiver();
 
         let nvs = nvstore::NvStore::new(
@@ -413,7 +391,7 @@ mod app {
                 .await
             {
                 Err(e) => {
-                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                    let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
                     guard.send(&e);
                 }
                 _ => {}
@@ -437,7 +415,7 @@ mod app {
             Ok(None) => {}
             Err(e) => {
                 {
-                    let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                    let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
                     guard.send(&e);
                 }
                 //defmt::println!("Failed to initialize storage: {:?}", e);
@@ -447,14 +425,14 @@ mod app {
         #[cfg(feature = "power_sensors")]
         if let Err(_) = i2c_task::spawn() {
             {
-                let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
                 guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
             }
         }
 
         if let Err(_) = start_flash::spawn(&NVSTORE) {
             {
-                let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
                 guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
             }
         }
@@ -463,7 +441,7 @@ mod app {
 
         if let Err(_) = blink::spawn(&mut args.leds[0]) {
             {
-                let mut guard = MAIN_ERROR_SENDER.get().await.lock().await;
+                let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
                 guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
             }
         }
