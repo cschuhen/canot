@@ -140,7 +140,7 @@ fn init(_cx: init::Context) -> (Shared, Local) {
 
 */
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     //let p = embassy_stm32::init(Default::default());
     info!("Hello World!");
     /*
@@ -272,31 +272,28 @@ async fn main(_spawner: Spawner) {
         POWER_SENSORS.get_or_init(|| Mutex::new(power_sensor_args));
     }
 
+    if let Err(_) = spawner.spawn(main_task(spawner, args, main_event_receiver)) {
+        error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+    }
+
+    #[cfg(feature = "terminal")]
+    {
+        let encoder_args = EncoderArgs(
+            encoder_pins,
+            main_event_sender.clone(),
+            error_sender.clone(),
+        );
+        if let Err(_) = spawner.spawn(encoder_task(encoder_args)) {
+            error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+        }
+    }
+
+    // Spawn ignition_task with cansleep as argument (moved from main_task)
+    if let Err(_) = spawner.spawn(ignition_task(cansleep)) {
+        error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+    }
+
     /*
-            if let Err(_) = main_task::spawn(args, main_event_receiver) {
-                error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
-            }
-
-            #[cfg(feature = "terminal")]
-            {
-                let encoder_args = EncoderArgs(
-                    encoder_pins,
-                    main_event_sender.clone(),
-                    error_sender.clone(),
-                );
-                if let Err(_) = encoder_task::spawn(encoder_args) {
-                    error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
-                }
-            }
-
-            // Spawn ignition_task with cansleep as argument (moved from main_task)
-            match ignition_task::spawn(cansleep) {
-                Ok(_) => {}
-                Err(_) => {
-                    error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
-                }
-            }
-
             (
                 // Return Shared resources
                 Shared {},
@@ -333,9 +330,10 @@ fn idle(cx: idle::Context) -> ! {
         rtic::export::wfi()
     }
 }
-
-#[task(priority = 1)]
-async fn start_flash(_cx: start_flash::Context, shared_nvs: &'static nvstore::SharedNvStore) {
+*/
+//#[task(priority = 1)]
+#[embassy_executor::task]
+async fn start_flash(shared_nvs: &'static nvstore::SharedNvStore) {
     #[cfg(feature = "power_sensors")]
     loop {
         let mut header = nvstore::power_sensors::Header::new();
@@ -360,8 +358,8 @@ async fn start_flash(_cx: start_flash::Context, shared_nvs: &'static nvstore::Sh
     }
 }
 
-#[task(priority = 2)]
-async fn blink(_cx: blink::Context, led: &mut crate::bsp::OutputPin) {
+#[embassy_executor::task]
+async fn blink(mut led: crate::bsp::OutputPin) {
     let mut delay = Delay {};
     loop {
         led.set_high();
@@ -383,7 +381,6 @@ async fn blink(_cx: blink::Context, led: &mut crate::bsp::OutputPin) {
         }
     }
 }
-*/
 
 #[allow(unused_mut, unused_variables)]
 #[embassy_executor::task]
@@ -397,10 +394,10 @@ async fn init_storage(
 ) -> Result<Option<i64>, j1939::error::Error> {
     crate::storage::run_init_storage(shared_nvs, leds).await
 }
-/*
-#[task(priority = 2)]
+
+#[embassy_executor::task]
 async fn main_task(
-    _cx: main_task::Context,
+    spawner: Spawner,
     mut args: MainArgs,
     events: Receiver<'static, CriticalSectionRawMutex, MainEvent, MAIN_EVENT_CAPACITY>,
 ) {
@@ -447,14 +444,14 @@ async fn main_task(
     }
 
     #[cfg(feature = "power_sensors")]
-    if let Err(_) = i2c_task::spawn() {
+    if let Err(_) = spawner.spawn(i2c_task()) {
         {
             let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
             guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
     }
 
-    if let Err(_) = start_flash::spawn(&NVSTORE) {
+    if let Err(_) = spawner.spawn(start_flash(&NVSTORE)) {
         {
             let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
             guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
@@ -463,7 +460,9 @@ async fn main_task(
 
     args.leds[4].set_high();
 
-    if let Err(_) = blink::spawn(&mut args.leds[0]) {
+    let [led0, led1, led2, led3, led4] = args.leds;
+
+    if let Err(_) = spawner.spawn(blink(led0)) {
         {
             let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
             guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
@@ -474,7 +473,6 @@ async fn main_task(
     APP.get().await.lock().await.run_loop(events).await;
 }
 
-*/
 #[allow(unused_mut, unused_variables)]
 #[embassy_executor::task]
 async fn i2c_task() {
