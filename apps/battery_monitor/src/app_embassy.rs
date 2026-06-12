@@ -383,21 +383,21 @@ async fn blink(_cx: blink::Context, led: &mut crate::bsp::OutputPin) {
         }
     }
 }
+*/
 
 #[allow(unused_mut, unused_variables)]
-#[task(priority = 1)]
-async fn ignition_task(_cx: ignition_task::Context, mut cansleep: Output<'static>) {
+#[embassy_executor::task]
+async fn ignition_task(mut cansleep: Output<'static>) {
     #[cfg(feature = "power_sensors")]
     crate::ignition_input::run_ignition(&mut cansleep).await;
 }
-
 async fn init_storage(
     shared_nvs: &nvstore::SharedNvStore,
     leds: &mut crate::bsp::Leds,
 ) -> Result<Option<i64>, j1939::error::Error> {
     crate::storage::run_init_storage(shared_nvs, leds).await
 }
-
+/*
 #[task(priority = 2)]
 async fn main_task(
     _cx: main_task::Context,
@@ -474,9 +474,10 @@ async fn main_task(
     APP.get().await.lock().await.run_loop(events).await;
 }
 
+*/
 #[allow(unused_mut, unused_variables)]
-#[task(priority = 3)]
-async fn i2c_task(mut cx: i2c_task::Context) {
+#[embassy_executor::task]
+async fn i2c_task() {
     #[cfg(feature = "power_sensors")]
     {
         let mut guard = POWER_SENSORS.get().await.lock().await;
@@ -487,15 +488,12 @@ async fn i2c_task(mut cx: i2c_task::Context) {
     }
 }
 
-#[allow(unused_mut, unused_variables)]
-#[task(priority = 1)]
-async fn encoder_task(_cx: encoder_task::Context, mut args: EncoderArgs) {
+#[embassy_executor::task]
+pub async fn encoder_task(mut args: EncoderArgs) {
     #[cfg(feature = "terminal")]
     crate::encoder::run_encoder(&mut args).await;
 }
 
-
-*/
 /*
  */
 /*
