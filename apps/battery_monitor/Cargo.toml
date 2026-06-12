@@ -3,6 +3,14 @@ name = "app_embassy"
 path = "src/app_embassy.rs"
 
 [[bin]]
+name = "pwrsns_embassy"
+path = "src/app_embassy.rs"
+
+[[bin]]
+name = "terminal_embassy"
+path = "src/app_embassy.rs"
+
+[[bin]]
 name = "pwrsns_rtic"
 path = "src/main.rs"
 
