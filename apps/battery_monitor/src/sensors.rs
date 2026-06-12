@@ -34,7 +34,7 @@ use static_cell::StaticCell;
 /// and returns a fully constructed `PowerSensorArgs` ready for init_power_sensors + run_power_sensors.
 pub fn init_power_sensor_args(
     mut sensors_i2c: crate::bsp::SensorI2c,
-    mon_alert_pins: [ExtiInput<'static>; 4],
+    mon_alert_pins: [ExtiInput<'static, embassy_stm32::mode::Async>; 4],
     main_event_sender: Sender<
         'static,
         CriticalSectionRawMutex,

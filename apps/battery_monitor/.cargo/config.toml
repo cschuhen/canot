@@ -22,5 +22,4 @@ target = "thumbv7em-none-eabi"    # Cortex-M3
 rr = "run --release "
 
 [env]
-DEFMT_LOG = "trace"
-
+DEFMT_LOG = "info"

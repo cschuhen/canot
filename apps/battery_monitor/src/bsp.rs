@@ -4,7 +4,7 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::mode;
 use embassy_stm32::peripherals::*;
-use embassy_stm32::{bind_interrupts, can, i2c, peripherals, spi};
+use embassy_stm32::{bind_interrupts, can, dma, exti, i2c, interrupt, peripherals, spi};
 
 use j1939_async as j1939;
 
@@ -12,28 +12,48 @@ bind_interrupts!(struct CanIrqs {
     FDCAN1_IT0 => can::IT0InterruptHandler<FDCAN1>;
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>;
 });
-bind_interrupts!(struct I2c1Irqs {
-    I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
+
+bind_interrupts!(struct I2cIrqs {
     I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
-});
-
-bind_interrupts!(struct I2c2Irqs {
-    I2C2_EV => i2c::EventInterruptHandler<peripherals::I2C2>;
+    I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
     I2C2_ER => i2c::ErrorInterruptHandler<peripherals::I2C2>;
+    I2C2_EV => i2c::EventInterruptHandler<peripherals::I2C2>;
+    DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
+    DMA1_CHANNEL3 => dma::InterruptHandler<peripherals::DMA1_CH3>;
+    DMA1_CHANNEL4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
 });
 
-pub type ExtiPin = embassy_stm32::exti::ExtiInput<'static>;
+bind_interrupts!(
+    pub struct ExtiIrqs{
+        EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
+        EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
+        EXTI3 => exti::InterruptHandler<interrupt::typelevel::EXTI3>;
+        EXTI4 => exti::InterruptHandler<interrupt::typelevel::EXTI4>;
+        EXTI9_5 => exti::InterruptHandler<interrupt::typelevel::EXTI9_5>;
+        EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
+});
+
+bind_interrupts!(struct SpiIrqs {
+    DMA2_CHANNEL1 => dma::InterruptHandler<peripherals::DMA2_CH1>;
+    DMA2_CHANNEL2 => dma::InterruptHandler<peripherals::DMA2_CH2>;
+    DMA2_CHANNEL3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
+    DMA2_CHANNEL4 => dma::InterruptHandler<peripherals::DMA2_CH4>;
+});
+
+pub type ExtiPin = embassy_stm32::exti::ExtiInput<'static, embassy_stm32::mode::Async>;
 pub type MonitorAlertPins = [ExtiPin; 4];
 pub type InputPins = [ExtiPin; 3];
 pub type NvI2c = embassy_stm32::i2c::I2c<'static, mode::Blocking, embassy_stm32::i2c::mode::Master>;
 pub type SensorI2c =
     embassy_stm32::i2c::I2c<'static, mode::Async, embassy_stm32::i2c::mode::Master>;
 #[allow(dead_code)]
-pub type SensorDevice = I2cDevice<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, SensorI2c>;
+pub type SensorDevice =
+    I2cDevice<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, SensorI2c>;
 pub type OutputPin = Output<'static>;
 pub type Crc = embassy_stm32::crc::Crc<'static>;
 
-pub type Spi = spi::Spi<'static, embassy_stm32::mode::Async>;
+pub type Spi = spi::Spi<'static, embassy_stm32::mode::Async, embassy_stm32::spi::mode::Master>;
 
 use w25q32jv::W25q32jv;
 
@@ -134,7 +154,7 @@ impl Bsp {
         }
         let p = embassy_stm32::init(config);
 
-        let device_id = j1939::name::identiy_from_bytes(&(*embassy_stm32::uid::uid())[..]);
+        let device_id = j1939::name::identiy_from_bytes(&embassy_stm32::uid::uid());
         //defmt::println!("DID {:?}->{:x}", embassy_stm32::uid::uid(), device_id);
         let can_iface = can::CanConfigurator::new(p.FDCAN1, p.PA11, p.PA12, CanIrqs);
         let mut cansleep = Output::new(p.PA10, Level::Low, Speed::Low);
@@ -174,8 +194,8 @@ impl Bsp {
             I2c::new(
                 p.I2C1, p.PA15, // SCL
                 p.PB7,  // SDA
-                I2c1Irqs, p.DMA1_CH1, p.DMA1_CH2, //Hertz(400_000),
-                config,
+                p.DMA1_CH1, p.DMA1_CH2, //Hertz(400_000),
+                I2cIrqs, config,
             )
         };
 
@@ -191,26 +211,26 @@ impl Bsp {
 
         #[cfg(feature = "js1")]
         let sensor_alerts = [
-            ExtiInput::new(p.PB5, p.EXTI5, Pull::Up),
-            ExtiInput::new(p.PB4, p.EXTI4, Pull::Up),
-            ExtiInput::new(p.PA1, p.EXTI1, Pull::Up),
-            ExtiInput::new(p.PA0, p.EXTI0, Pull::Up),
+            ExtiInput::new(p.PB5, p.EXTI5, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PB4, p.EXTI4, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PA1, p.EXTI1, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PA0, p.EXTI0, Pull::Up, ExtiIrqs),
         ];
         #[cfg(not(feature = "js1"))]
         let sensor_alerts = [
-            ExtiInput::new(p.PB5, p.EXTI5, Pull::Up),
-            ExtiInput::new(p.PB4, p.EXTI4, Pull::Up),
-            ExtiInput::new(p.PA0, p.EXTI0, Pull::Up),
-            ExtiInput::new(p.PA1, p.EXTI1, Pull::Up),
+            ExtiInput::new(p.PB5, p.EXTI5, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PB4, p.EXTI4, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PA0, p.EXTI0, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PA1, p.EXTI1, Pull::Up, ExtiIrqs),
         ];
 
         let encoder_inputs = [
-            ExtiInput::new(p.PC13, p.EXTI13, Pull::Up),
-            ExtiInput::new(p.PB3, p.EXTI3, Pull::Up),
-            ExtiInput::new(p.PB11, p.EXTI11, Pull::Up),
+            ExtiInput::new(p.PC13, p.EXTI13, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PB3, p.EXTI3, Pull::Up, ExtiIrqs),
+            ExtiInput::new(p.PB11, p.EXTI11, Pull::Up, ExtiIrqs),
         ];
 
-        let ignition_pin = ExtiInput::new(p.PB6, p.EXTI6, Pull::Down);
+        let ignition_pin = ExtiInput::new(p.PB6, p.EXTI6, Pull::Down, ExtiIrqs);
 
         let flash = {
             let cs = Output::new(p.PB12, Level::High, Speed::Low);
@@ -223,7 +243,7 @@ impl Bsp {
             config.frequency = Hertz(16_000_000);
 
             let spi = embassy_stm32::spi::Spi::new(
-                p.SPI2, sck, mosi, miso, p.DMA2_CH1, p.DMA2_CH2, config,
+                p.SPI2, sck, mosi, miso, p.DMA2_CH1, p.DMA2_CH2, SpiIrqs, config,
             );
             let spi: SpiDevice = embedded_hal_bus::spi::ExclusiveDevice::new_no_delay(spi, cs);
 
@@ -239,7 +259,7 @@ impl Bsp {
             config.frequency = Hertz(16_000_000);
 
             let spi = embassy_stm32::spi::Spi::new(
-                p.SPI1, sck, mosi, miso, p.DMA2_CH3, p.DMA2_CH4, config,
+                p.SPI1, sck, mosi, miso, p.DMA2_CH3, p.DMA2_CH4, SpiIrqs, config,
             );
 
             let dc = Output::new(p.PA2, Level::High, Speed::Low);

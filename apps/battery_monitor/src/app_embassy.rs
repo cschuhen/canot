@@ -270,8 +270,9 @@ async fn main(spawner: Spawner) {
         POWER_SENSORS.get_or_init(|| Mutex::new(power_sensor_args));
     }
 
-    if let Err(_) = spawner.spawn(main_task(spawner, args, main_event_receiver)) {
-        error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+    match main_task(spawner, args, main_event_receiver) {
+        Ok(task) => spawner.spawn(task),
+        Err(_) => error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!()),
     }
 
     #[cfg(feature = "terminal")]
@@ -281,14 +282,16 @@ async fn main(spawner: Spawner) {
             main_event_sender.clone(),
             error_sender.clone(),
         );
-        if let Err(_) = spawner.spawn(encoder_task(encoder_args)) {
-            error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+        match encoder_task(encoder_args) {
+            Ok(task) => spawner.spawn(task),
+            Err(_) => error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!()),
         }
     }
 
     // Spawn ignition_task with cansleep as argument (moved from main_task)
-    if let Err(_) = spawner.spawn(ignition_task(cansleep)) {
-        error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
+    match ignition_task(cansleep) {
+        Ok(task) => spawner.spawn(task),
+        Err(_) => error_sender.report(FILE_CODE, ErrorCode::SpawnError as u8, line!()),
     }
 
     /*
@@ -442,15 +445,17 @@ async fn main_task(
     }
 
     #[cfg(feature = "power_sensors")]
-    if let Err(_) = spawner.spawn(i2c_task()) {
-        {
+    match i2c_task() {
+        Ok(task) => spawner.spawn(task),
+        Err(_) => {
             let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
             guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
     }
 
-    if let Err(_) = spawner.spawn(start_flash(&NVSTORE)) {
-        {
+    match start_flash(&NVSTORE) {
+        Ok(task) => spawner.spawn(task),
+        Err(_) => {
             let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
             guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }
@@ -460,8 +465,9 @@ async fn main_task(
 
     let [led0, _led1, _led2, _led3, _led4] = args.leds;
 
-    if let Err(_) = spawner.spawn(blink(led0)) {
-        {
+    match blink(led0) {
+        Ok(task) => spawner.spawn(task),
+        Err(_) => {
             let mut guard = crate::can_init::MAIN_ERROR_SENDER.get().await.lock().await;
             guard.report(FILE_CODE, ErrorCode::SpawnError as u8, line!());
         }

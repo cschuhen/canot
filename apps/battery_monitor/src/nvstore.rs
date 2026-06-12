@@ -353,18 +353,17 @@ impl NvStore {
     ) -> Result<(), Error> {
         let mut write = self.write;
         let mut read = self.read;
-        let crc;
         {
             {
                 self.crc.reset();
-                crc = self.crc.feed_bytes(
+                self.crc.feed_bytes(
                     &data[0..power_sensors::FULL_RECORD_SIZE as usize - power_sensors::TAIL_SIZE],
                 );
                 let mut state = power_sensors::record_tail::View::new(
                     &mut data[power_sensors::FULL_RECORD_SIZE as usize - power_sensors::TAIL_SIZE
                         ..power_sensors::FULL_RECORD_SIZE as usize],
                 );
-                state.crc_mut().write(crc);
+                state.crc_mut().write(self.crc.read());
             }
         }
 

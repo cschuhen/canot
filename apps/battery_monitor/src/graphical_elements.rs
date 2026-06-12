@@ -96,8 +96,9 @@ impl UnitSpec {
         let value = self.value(value);
         let mut ret = heapless::String::<CAP>::new();
         let value = tfmt::Convert::<CAP>::from_f32(value, 2)?;
-        ret.push_str(value.as_str())?;
-        ret.push_str(self.string)?;
+        // FIXME: Map these errors instead to our own nice error type.
+        ret.push_str(value.as_str()).map_err(|_| ())?;
+        ret.push_str(self.string).map_err(|_| ())?;
         Ok(ret)
     }
 
@@ -128,9 +129,9 @@ impl UnitSpec {
 
         let mut ret = heapless::String::<CAP>::new();
         let value = tfmt::Convert::<CAP>::from_f32(value, 2)?;
-        ret.push_str(value.as_str())?;
-        ret.push_str(prefix)?;
-        ret.push_str(self.string)?;
+        ret.push_str(value.as_str()).map_err(|_| ())?;
+        ret.push_str(prefix).map_err(|_| ())?;
+        ret.push_str(self.string).map_err(|_| ())?;
         Ok(ret)
     }
 }
